@@ -27,6 +27,21 @@ describe("vat report CLI", () => {
     expect(parsed.ok).toBe(true);
     expect(parsed.inputVat).toBe(250);
     expect(parsed.netVatPayable).toBe(-250);
+    expect(parsed.taxAgencyMapping).toEqual({
+      rubrikA_outputVatDomestic: 0,
+      rubrikB_euGoodsPurchaseVat: 0,
+      rubrikC_euServicesPurchaseVat: 0,
+      rubrikD_inputVatDomestic: 250,
+      rubrikE_euGoodsSale: 0,
+      rubrikF_euServicesSale: 0,
+      rubrikG_exportOutsideEu: 0,
+      netToPayOrReceive: -250,
+    });
+    expect(parsed.formGuidance).toEqual({
+      skatTastSelvUrl: "https://www.skat.dk/tastselv/erhverv",
+      periodLabel: "2026-05-01..2026-05-31",
+      companyCvr: "DK12345678",
+    });
     expect(parsed.warnings).toEqual([]);
     expect(parsed.journalEntryCount).toBe(1);
     expect(parsed.totalJournalEntryCount).toBe(1);

@@ -58,6 +58,7 @@ describe("representation VAT", () => {
     expect(vat.ok).toBe(true);
     expect(vat.inputVat).toBe(62.5);
     expect(vat.representationPurchaseBase).toBe(1000);
+    expect(vat.taxAgencyMapping.rubrikD_inputVatDomestic).toBe(62.5);
     expect(vat.netVatPayable).toBe(-62.5);
 
     const chain = verifyAuditChain(db);

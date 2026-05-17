@@ -65,6 +65,21 @@ describe("vat report", () => {
     expect(may.salesBase25).toBe(1000);
     expect(may.purchaseBase25).toBe(1000);
     expect(may.badDebtReliefBase25).toBe(0);
+    expect(may.taxAgencyMapping).toEqual({
+      rubrikA_outputVatDomestic: 250,
+      rubrikB_euGoodsPurchaseVat: 0,
+      rubrikC_euServicesPurchaseVat: 0,
+      rubrikD_inputVatDomestic: 250,
+      rubrikE_euGoodsSale: 0,
+      rubrikF_euServicesSale: 0,
+      rubrikG_exportOutsideEu: 0,
+      netToPayOrReceive: 0,
+    });
+    expect(may.formGuidance).toEqual({
+      skatTastSelvUrl: "https://www.skat.dk/tastselv/erhverv",
+      periodLabel: "2026-05-01..2026-05-31",
+      companyCvr: "DK12345678",
+    });
     expect(may.journalEntryCount).toBe(2);
     expect(may.totalJournalEntryCount).toBe(2);
     expect(may.warnings).toEqual([]);
@@ -163,6 +178,61 @@ describe("vat report", () => {
     expect(report.reversalLinesConsidered).toBe(3);
     expect(report.totalLinesConsidered).toBe(8);
     expect(report.warnings).toContain("input VAT mismatch: booked 0, expected from base × rate 250");
+  });
+
+  test("separates reverse-charge VAT into TastSelv rubrik C instead of domestic rubrik A/D", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-vat-rubrik-"));
+    const inbox = mkdtempSync(join(tmpdir(), "rentemester-vat-rubrik-inbox-"));
+    const sourceFile = join(inbox, "invoice.txt");
+    writeFileSync(sourceFile, "EU service invoice\n1000 DKK\n");
+
+    const db = openDb(ensureCompanyDirs(root).db);
+    migrate(db);
+    seedAccounts(db);
+
+    const doc = ingestDocument(db, root, sourceFile, {
+      source: "email",
+      issueDate: "2026-05-16",
+      invoiceNo: "INV-VAT-RC-1",
+      deliveryDescription: "EU software service",
+      amountIncVat: 1000,
+      currency: "DKK",
+      sender: { name: "EU Supplier GmbH", address: "Berlin", vatOrCvr: "DE123456789" },
+      recipient: { name: "Rentemester ApS", address: "Testvej 1", vatOrCvr: "DK12345678" },
+      vatAmount: 0,
+      paymentDetails: "Bank transfer"
+    });
+    expect(doc.ok).toBe(true);
+
+    expect(postJournalEntry(db, {
+      transactionDate: "2026-05-17",
+      text: "EU service purchase",
+      documentId: doc.documentId,
+      lines: [
+        { accountNo: "3010", debitAmount: 1000, vatCode: "EU_SERVICE_REVERSE_CHARGE" },
+        { accountNo: "4000", debitAmount: 250 },
+        { accountNo: "2000", creditAmount: 1000 },
+        { accountNo: "1200", creditAmount: 250 }
+      ]
+    }).ok).toBe(true);
+
+    const report = buildVatReport(db, "2026-05-01", "2026-05-31");
+    expect(report.ok).toBe(true);
+    expect(report.taxAgencyMapping).toEqual({
+      rubrikA_outputVatDomestic: 0,
+      rubrikB_euGoodsPurchaseVat: 0,
+      rubrikC_euServicesPurchaseVat: 250,
+      rubrikD_inputVatDomestic: 0,
+      rubrikE_euGoodsSale: 0,
+      rubrikF_euServicesSale: 0,
+      rubrikG_exportOutsideEu: 0,
+      netToPayOrReceive: 250,
+    });
+    expect(report.netVatPayable).toBe(0);
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(inbox, { recursive: true, force: true });
 
     db.close();
     rmSync(root, { recursive: true, force: true });

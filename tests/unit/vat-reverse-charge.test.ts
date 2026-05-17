@@ -59,10 +59,53 @@ describe("EU service reverse-charge VAT", () => {
     expect(vat.outputVat).toBe(250);
     expect(vat.inputVat).toBe(250);
     expect(vat.reverseChargePurchaseBase).toBe(1000);
+    expect(vat.taxAgencyMapping.rubrikA_outputVatDomestic).toBe(0);
+    expect(vat.taxAgencyMapping.rubrikC_euServicesPurchaseVat).toBe(250);
+    expect(vat.taxAgencyMapping.rubrikD_inputVatDomestic).toBe(0);
     expect(vat.netVatPayable).toBe(0);
 
     const chain = verifyAuditChain(db);
     expect(chain.ok).toBe(true);
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+    rmSync(inbox, { recursive: true, force: true });
+  });
+
+  test("fails when no configured VAT rate covers the transaction date", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-rc-old-"));
+    const inbox = mkdtempSync(join(tmpdir(), "rentemester-rc-old-inbox-"));
+    const sourceFile = join(inbox, "eu-service.txt");
+    writeFileSync(sourceFile, "EU service invoice\n1000 DKK\n");
+
+    const db = openDb(ensureCompanyDirs(root).db);
+    migrate(db);
+    seedAccounts(db);
+
+    const doc = ingestDocument(db, root, sourceFile, {
+      source: "email",
+      issueDate: "1991-12-31",
+      invoiceNo: "EU-INV-OLD-1",
+      deliveryDescription: "EU software service",
+      amountIncVat: 1000,
+      currency: "DKK",
+      sender: { name: "EU Supplier GmbH", address: "Berlin", vatOrCvr: "DE123456789" },
+      recipient: { name: "Rentemester ApS", address: "Testvej 1", vatOrCvr: "DK12345678" },
+      vatAmount: 0,
+      paymentDetails: "Bank transfer"
+    });
+    expect(doc.ok).toBe(true);
+
+    const posted = postEuServiceReverseChargePurchase(db, {
+      transactionDate: "1991-12-31",
+      text: "EU service purchase",
+      documentId: doc.documentId!,
+      netAmount: 1000,
+      expenseAccountNo: "3010"
+    });
+
+    expect(posted.ok).toBe(false);
+    expect(posted.errors).toEqual(["no VAT rate defined for EU_SERVICE_REVERSE_CHARGE on 1991-12-31"]);
 
     db.close();
     rmSync(root, { recursive: true, force: true });

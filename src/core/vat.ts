@@ -1,4 +1,6 @@
 import type { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
 
 export type VatPeriodReport = {
@@ -14,6 +16,21 @@ export type VatPeriodReport = {
   reverseChargePurchaseBase: number;
   representationPurchaseBase: number;
   badDebtReliefBase25: number;
+  taxAgencyMapping: {
+    rubrikA_outputVatDomestic: number;
+    rubrikB_euGoodsPurchaseVat: number;
+    rubrikC_euServicesPurchaseVat: number;
+    rubrikD_inputVatDomestic: number;
+    rubrikE_euGoodsSale: number;
+    rubrikF_euServicesSale: number;
+    rubrikG_exportOutsideEu: number;
+    netToPayOrReceive: number;
+  };
+  formGuidance: {
+    skatTastSelvUrl: string;
+    periodLabel: string;
+    companyCvr: string | null;
+  };
   journalEntryCount: number;
   reversedJournalEntryCount: number;
   reversalJournalEntryCount: number;
@@ -27,8 +44,45 @@ export type VatPeriodReport = {
 };
 
 const RULE_ID = "DK-VAT-REPORT-001";
+const VAT_SUBMISSION_RULE_ID = "DK-VAT-INDBERETNING-001";
 const REVERSE_CHARGE_RULE_ID = "DK-VAT-REVERSE-CHARGE-001";
 const REPRESENTATION_RULE_ID = "DK-VAT-REPRESENTATION-001";
+
+const vatRulesPath = fileURLToPath(new URL("../../rules/dk/vat.yaml", import.meta.url));
+
+type VatRateRule = { code: string; rate: number; validFrom: string; validTo: string | null };
+type VatConfig = { rates: VatRateRule[]; representationDeductibleShare: number };
+
+function parseVatConfig(): VatConfig {
+  const text = readFileSync(vatRulesPath, "utf8");
+  const rates: VatRateRule[] = [];
+  const blocks = text.split(/^\s*-\s*code:\s*/m).slice(1);
+  for (const block of blocks) {
+    const codeMatch = block.match(/^(\S+)/m);
+    const rateMatch = block.match(/^\s*rate:\s*([0-9.]+)$/m);
+    const validFromMatch = block.match(/^\s*valid_from:\s*(\S+)$/m);
+    const validToMatch = block.match(/^\s*valid_to:\s*(\S+)$/m);
+    if (codeMatch && rateMatch && validFromMatch && validToMatch) {
+      rates.push({
+        code: codeMatch[1],
+        rate: Number(rateMatch[1]),
+        validFrom: validFromMatch[1],
+        validTo: validToMatch[1] === "null" ? null : validToMatch[1],
+      });
+    }
+  }
+  const representationBlock = blocks.find((block) => block.startsWith("REPRESENTATION_SPECIAL"));
+  const shareMatch = representationBlock?.match(/^\s*deductible_percentage:\s*([0-9.]+)$/m);
+  const representationDeductibleShare = shareMatch ? Number(shareMatch[1]) : 0.25;
+  return { rates, representationDeductibleShare };
+}
+
+const VAT_CONFIG = parseVatConfig();
+
+function vatRateFor(code: string, onDate: string) {
+  const match = VAT_CONFIG.rates.find((rate) => rate.code === code && rate.validFrom <= onDate && (!rate.validTo || rate.validTo >= onDate));
+  return match?.rate;
+}
 
 export type ReverseChargePurchaseInput = {
   transactionDate: string;
@@ -60,6 +114,17 @@ function round2(value: number) {
   return Number(value.toFixed(2));
 }
 
+function companyCvr(db: Database) {
+  const row = db.query(
+    `SELECT recipient_vat_cvr as cvr
+     FROM documents
+     WHERE recipient_vat_cvr IS NOT NULL AND recipient_vat_cvr != ''
+     ORDER BY id DESC
+     LIMIT 1`
+  ).get() as { cvr?: string | null } | null;
+  return row?.cvr ?? null;
+}
+
 export function postEuServiceReverseChargePurchase(db: Database, input: ReverseChargePurchaseInput): JournalPostResult {
   const errors: string[] = [];
   if (!looksLikeIsoDate(input.transactionDate)) errors.push("transactionDate must be YYYY-MM-DD");
@@ -69,7 +134,10 @@ export function postEuServiceReverseChargePurchase(db: Database, input: ReverseC
   if (typeof input.expenseAccountNo !== "string" || input.expenseAccountNo.trim().length === 0) errors.push("expenseAccountNo is required");
   if (errors.length > 0) return { ok: false, appliedRules: [REVERSE_CHARGE_RULE_ID], errors };
 
-  const vatAmount = round2(input.netAmount * 0.25);
+  const vatRate = vatRateFor("EU_SERVICE_REVERSE_CHARGE", input.transactionDate);
+  if (vatRate === undefined) return { ok: false, appliedRules: [REVERSE_CHARGE_RULE_ID], errors: [`no VAT rate defined for EU_SERVICE_REVERSE_CHARGE on ${input.transactionDate}`] };
+
+  const vatAmount = round2(input.netAmount * vatRate);
   const result = postJournalEntry(db, {
     transactionDate: input.transactionDate,
     text: input.text.trim(),
@@ -98,8 +166,11 @@ export function postRepresentationPurchase(db: Database, input: RepresentationPu
   if (!Number.isFinite(input.netAmount) || input.netAmount <= 0) errors.push("netAmount must be a positive number");
   if (errors.length > 0) return { ok: false, appliedRules: [REPRESENTATION_RULE_ID], errors };
 
-  const fullVatAmount = round2(input.netAmount * 0.25);
-  const deductibleVatAmount = round2(fullVatAmount * 0.25);
+  const vatRate = vatRateFor("REPRESENTATION_SPECIAL", input.transactionDate);
+  if (vatRate === undefined) return { ok: false, appliedRules: [REPRESENTATION_RULE_ID], errors: [`no VAT rate defined for REPRESENTATION_SPECIAL on ${input.transactionDate}`] };
+
+  const fullVatAmount = round2(input.netAmount * vatRate);
+  const deductibleVatAmount = round2(fullVatAmount * VAT_CONFIG.representationDeductibleShare);
   const nonDeductibleVatAmount = round2(fullVatAmount - deductibleVatAmount);
   const grossAmount = round2(input.netAmount + fullVatAmount);
 
@@ -159,6 +230,21 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
       reversedLinesConsidered: 0,
       reversalLinesConsidered: 0,
       totalLinesConsidered: 0,
+      taxAgencyMapping: {
+        rubrikA_outputVatDomestic: 0,
+        rubrikB_euGoodsPurchaseVat: 0,
+        rubrikC_euServicesPurchaseVat: 0,
+        rubrikD_inputVatDomestic: 0,
+        rubrikE_euGoodsSale: 0,
+        rubrikF_euServicesSale: 0,
+        rubrikG_exportOutsideEu: 0,
+        netToPayOrReceive: 0,
+      },
+      formGuidance: {
+        skatTastSelvUrl: "https://www.skat.dk/tastselv/erhverv",
+        periodLabel: `${periodStart}..${periodEnd}`,
+        companyCvr: null,
+      },
       warnings: [],
       errors,
     };
@@ -233,8 +319,12 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
   representationPurchaseBase = round2(representationPurchaseBase);
   badDebtReliefBase25 = round2(badDebtReliefBase25);
 
-  const expectedOutputVat = round2(salesBase25 * 0.25 + reverseChargePurchaseBase * 0.25 - badDebtReliefBase25 * 0.25);
-  const expectedInputVat = round2(purchaseBase25 * 0.25 + reverseChargePurchaseBase * 0.25 + representationPurchaseBase * 0.25 * 0.25);
+  const saleVatRate = vatRateFor("DK_SALE_25", periodEnd) ?? 0.25;
+  const purchaseVatRate = vatRateFor("DK_PURCHASE_25", periodEnd) ?? 0.25;
+  const reverseChargeVatRate = vatRateFor("EU_SERVICE_REVERSE_CHARGE", periodEnd) ?? 0.25;
+  const representationVatRate = vatRateFor("REPRESENTATION_SPECIAL", periodEnd) ?? 0.25;
+  const expectedOutputVat = round2(salesBase25 * saleVatRate + reverseChargePurchaseBase * reverseChargeVatRate - badDebtReliefBase25 * saleVatRate);
+  const expectedInputVat = round2(purchaseBase25 * purchaseVatRate + reverseChargePurchaseBase * reverseChargeVatRate + representationPurchaseBase * representationVatRate * VAT_CONFIG.representationDeductibleShare);
   const warnings: string[] = [];
   if (Math.abs(outputVat - expectedOutputVat) > 0.5) {
     warnings.push(`output VAT mismatch: booked ${outputVat}, expected from base × rate ${expectedOutputVat}`);
@@ -243,9 +333,14 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
     warnings.push(`input VAT mismatch: booked ${inputVat}, expected from base × rate ${expectedInputVat}`);
   }
 
+  const rubrikC_euServicesPurchaseVat = round2(reverseChargePurchaseBase * reverseChargeVatRate);
+  const rubrikA_outputVatDomestic = round2(outputVat - rubrikC_euServicesPurchaseVat);
+  const rubrikD_inputVatDomestic = round2(inputVat - rubrikC_euServicesPurchaseVat);
+  const netToPayOrReceive = round2(rubrikA_outputVatDomestic + rubrikC_euServicesPurchaseVat - rubrikD_inputVatDomestic);
+
   return {
     ok: true,
-    appliedRules: [RULE_ID],
+    appliedRules: [RULE_ID, VAT_SUBMISSION_RULE_ID],
     periodStart,
     periodEnd,
     outputVat,
@@ -256,6 +351,21 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
     reverseChargePurchaseBase,
     representationPurchaseBase,
     badDebtReliefBase25,
+    taxAgencyMapping: {
+      rubrikA_outputVatDomestic,
+      rubrikB_euGoodsPurchaseVat: 0,
+      rubrikC_euServicesPurchaseVat,
+      rubrikD_inputVatDomestic,
+      rubrikE_euGoodsSale: 0,
+      rubrikF_euServicesSale: 0,
+      rubrikG_exportOutsideEu: 0,
+      netToPayOrReceive,
+    },
+    formGuidance: {
+      skatTastSelvUrl: "https://www.skat.dk/tastselv/erhverv",
+      periodLabel: `${periodStart}..${periodEnd}`,
+      companyCvr: companyCvr(db),
+    },
     journalEntryCount: activeEntryIds.size,
     reversedJournalEntryCount: reversedEntryIds.size,
     reversalJournalEntryCount: reversalEntryIds.size,

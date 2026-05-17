@@ -1,4 +1,4 @@
-version: dk-vat-v0.0.2
+version: dk-vat-v0.0.3
 sources:
   - DK-MOMSLOVEN-2024-209
   - DK-MOMSBEKENDTGORELSEN-2023-1435
@@ -6,26 +6,36 @@ vat_codes:
   - code: DK_PURCHASE_25
     type: purchase
     rate: 0.25
+    valid_from: 1992-01-01
+    valid_to: null
     reverse_charge: false
     deductible_percentage: 1.0
   - code: DK_SALE_25
     type: sale
     rate: 0.25
+    valid_from: 1992-01-01
+    valid_to: null
     reverse_charge: false
     deductible_percentage: 1.0
   - code: EU_SERVICE_REVERSE_CHARGE
     type: purchase
     rate: 0.25
+    valid_from: 1992-01-01
+    valid_to: null
     reverse_charge: true
     deductible_percentage: 1.0
   - code: REPRESENTATION_SPECIAL
     type: purchase
     rate: 0.25
+    valid_from: 1992-01-01
+    valid_to: null
     reverse_charge: false
     deductible_percentage: 0.25
   - code: DK_BAD_DEBT_25
     type: sale_adjustment
     rate: 0.25
+    valid_from: 1992-01-01
+    valid_to: null
     reverse_charge: false
     deductible_percentage: 1.0
 rules:
@@ -52,6 +62,18 @@ rules:
         - net_vat_payable
         - traceable_journal_entries_in_period
     explanation: Rentemester must deterministically derive the VAT settlement basis for a period from traceable journal data so the business can reconcile and file VAT correctly.
+  - rule_id: DK-VAT-INDBERETNING-001
+    name: VAT report must expose a direct TastSelv-compatible rubrik mapping for filing
+    category: vat_reporting
+    source_id: DK-MOMSLOVEN-2024-209
+    severity: warning
+    machine_rule:
+      require:
+        - rubrik_a_output_vat_domestic
+        - rubrik_c_eu_services_purchase_vat
+        - rubrik_d_input_vat_domestic
+        - net_to_pay_or_receive
+    explanation: Rentemester must project VAT period totals into the filing rubrikker used by TastSelv so the business can report without manually reinterpreting reverse-charge and domestic VAT components.
   - rule_id: DK-VAT-REVERSE-CHARGE-001
     name: EU service reverse-charge purchases must book both output and deductible input VAT in the period
     category: vat_posting
