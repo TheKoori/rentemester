@@ -5,6 +5,7 @@ import type { Database } from "bun:sqlite";
 import { companyPaths } from "./paths";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
 import { promoteTempFile, removeIfExists, writeTempFileFor } from "./atomic-file";
+import { insertAuditLog } from "./actor";
 
 export type IssueCreditNoteInput = {
   originalInvoiceDocumentId: number;
@@ -143,11 +144,14 @@ export function issueCreditNote(db: Database, companyRoot: string, input: IssueC
       });
       if (!journal.ok) throw new Error(JSON.stringify({ appliedRules: journal.appliedRules, errors: journal.errors }));
 
-      db.run(
-        "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('credit_note_issue', 'document', ?, ?)",
-        String(doc.id),
-        `Issued credit note ${creditNoteNumber} for ${original.invoice_no}`
-      );
+      insertAuditLog(db, {
+        eventType: "credit_note_issue",
+        entityType: "document",
+        entityId: doc.id,
+        message: `Issued credit note ${creditNoteNumber} for ${original.invoice_no}`,
+        createdBy: input.createdBy,
+        createdByProgram: input.createdByProgram,
+      });
 
       return { docId: doc.id, journal };
     })();

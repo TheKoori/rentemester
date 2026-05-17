@@ -3,6 +3,7 @@ import { join, relative } from "node:path";
 import { createHash, createHmac, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { companyPaths } from "./paths";
+import { insertAuditLog } from "./actor";
 
 const BACKUP_RULE_ID = "DK-BOOKKEEPING-BACKUP-001";
 const BACKUP_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -252,10 +253,13 @@ export function createSystemBackup(db: Database, companyRoot: string, input: Cre
   writeFileSync(manifestPath, manifestText);
   writeFileSync(backupManifestSignaturePath(backupDir), `${signManifestText(manifestText, manifestKey)}\n`);
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message, actor) VALUES ('system_backup', 'company', '1', ?, 'system')",
-    `Created full backup ${backupId}`,
-  );
+  insertAuditLog(db, {
+    eventType: "system_backup",
+    entityType: "company",
+    entityId: 1,
+    message: `Created full backup ${backupId}`,
+    fallbackActor: { createdBy: "scheduled:system_backup", createdByProgram: "rentemester-cron" },
+  });
 
   return { ok: true, backupId, backupDir, manifestPath, dbSnapshotPath, appliedRules: [BACKUP_RULE_ID], errors: [] };
 }

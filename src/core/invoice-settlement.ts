@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { applyInvoicePayment, getInvoiceStatus } from "./invoice-payments";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-INVOICE-SETTLEMENT-001";
 const COMBINED_RULE_ID = "DK-INVOICE-COMBINED-SETTLEMENT-001";
@@ -130,11 +131,14 @@ export function settleInvoiceFromBank(db: Database, input: SettleInvoiceFromBank
            RETURNING id`
         ).get(input.invoiceDocumentId, bank.id, paymentDate, claimAmount, `Combined settlement claim component from transaction ${bank.id}`) as { id: number };
         claimPaymentId = claimPayment.id;
-        db.run(
-          "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_claim_payment_apply', 'invoice_claim_payment', ?, ?)",
-          String(claimPayment.id),
-          `Applied claim receipt ${claimAmount} to invoice ${invoice.invoice_no} via combined settlement`
-        );
+        insertAuditLog(db, {
+          eventType: "invoice_claim_payment_apply",
+          entityType: "invoice_claim_payment",
+          entityId: claimPayment.id,
+          message: `Applied claim receipt ${claimAmount} to invoice ${invoice.invoice_no} via combined settlement`,
+          createdBy: input.createdBy,
+          createdByProgram: input.createdByProgram,
+        });
       }
 
       const after = getInvoiceStatus(db, input.invoiceDocumentId);

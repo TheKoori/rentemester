@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
 import { getInvoiceStatus } from "./invoice-payments";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-INVOICE-REFUND-001";
 
@@ -70,11 +71,14 @@ export function refundInvoiceToBank(db: Database, input: RefundInvoiceToBankInpu
          RETURNING id`
       ).get(input.invoiceDocumentId, bank.id, refundDate, amount, `Customer refund from transaction ${bank.id}`) as { id: number };
 
-      db.run(
-        "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_refund_apply', 'invoice_refund', ?, ?)",
-        String(refund.id),
-        `Applied refund ${amount} to invoice ${invoice.invoice_no}`
-      );
+      insertAuditLog(db, {
+        eventType: "invoice_refund_apply",
+        entityType: "invoice_refund",
+        entityId: refund.id,
+        message: `Applied refund ${amount} to invoice ${invoice.invoice_no}`,
+        createdBy: input.createdBy,
+        createdByProgram: input.createdByProgram,
+      });
 
       const journal = postJournalEntry(db, {
         transactionDate: refundDate,

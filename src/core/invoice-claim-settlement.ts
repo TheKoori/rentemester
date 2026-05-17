@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { getInvoiceStatus } from "./invoice-payments";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-INVOICE-CLAIM-SETTLEMENT-001";
 
@@ -75,11 +76,14 @@ export function settleInvoiceClaimsFromBank(db: Database, input: SettleInvoiceCl
          RETURNING id`
       ).get(input.invoiceDocumentId, bank.id, paymentDate, amount, `Claim settlement from transaction ${bank.id}`) as { id: number };
 
-      db.run(
-        "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_claim_payment_apply', 'invoice_claim_payment', ?, ?)",
-        String(payment.id),
-        `Applied claim receipt ${amount} to invoice ${invoice.invoice_no}`
-      );
+      insertAuditLog(db, {
+        eventType: "invoice_claim_payment_apply",
+        entityType: "invoice_claim_payment",
+        entityId: payment.id,
+        message: `Applied claim receipt ${amount} to invoice ${invoice.invoice_no}`,
+        createdBy: input.createdBy,
+        createdByProgram: input.createdByProgram,
+      });
 
       const journal = postJournalEntry(db, {
         transactionDate: paymentDate,

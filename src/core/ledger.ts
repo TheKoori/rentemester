@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { getInvoiceStatus } from "./invoice-payments";
 import { currentRuleBundleVersion } from "./rules-metadata";
+import { insertAuditLog, resolveActor } from "./actor";
 
 export type JournalLineInput = {
   accountNo: string;
@@ -199,6 +200,7 @@ export function postJournalEntry(db: Database, payload: JournalEntryInput): Jour
   const accounts = accountMap(db);
   const entryNo = nextEntryNo(db);
   const prevHash = previousHash(db);
+  const actor = resolveActor({ createdBy: payload.createdBy, createdByProgram: payload.createdByProgram });
 
   const result = db.transaction(() => {
     const canonicalLines = payload.lines.map((line) => ({
@@ -219,8 +221,8 @@ export function postJournalEntry(db: Database, payload: JournalEntryInput): Jour
       amount_dkk: payload.amountDkk ?? null,
       fx_rate_to_dkk: payload.fxRateToDkk ?? null,
       rule_version: RULE_VERSION,
-      created_by: payload.createdBy ?? 'system',
-      created_by_program: payload.createdByProgram ?? 'rentemester',
+      created_by: actor.createdBy,
+      created_by_program: actor.createdByProgram,
       status: 'posted',
       reversal_of_entry_id: null,
     };
@@ -246,8 +248,8 @@ export function postJournalEntry(db: Database, payload: JournalEntryInput): Jour
       payload.amountDkk ?? null,
       payload.fxRateToDkk ?? null,
       RULE_VERSION,
-      payload.createdBy ?? 'system',
-      payload.createdByProgram ?? 'rentemester',
+      actor.createdBy,
+      actor.createdByProgram,
       prevHash,
       entryHash,
     ) as any;
@@ -262,11 +264,14 @@ export function postJournalEntry(db: Database, payload: JournalEntryInput): Jour
       insertLine.run(entry.id, account.id, line.debit_amount, line.credit_amount, line.vat_code, line.text);
     });
 
-    db.run(
-      "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('journal_post', 'journal_entry', ?, ?)",
-      String(entry.id),
-      `Posted journal entry ${entry.entry_no}`
-    );
+    insertAuditLog(db, {
+      eventType: "journal_post",
+      entityType: "journal_entry",
+      entityId: entry.id,
+      message: `Posted journal entry ${entry.entry_no}`,
+      createdBy: actor.createdBy,
+      createdByProgram: actor.createdByProgram,
+    });
 
     return { entryId: entry.id, entryNo: entry.entry_no, entryHash };
   })();
@@ -315,8 +320,8 @@ export function reverseJournalEntry(db: Database, input: { entryId: number; tran
     amountForeign: original.amount_foreign ?? undefined,
     amountDkk: original.amount_dkk ?? undefined,
     fxRateToDkk: original.fx_rate_to_dkk ?? undefined,
-    createdBy: input.createdBy ?? 'system',
-    createdByProgram: input.createdByProgram ?? 'rentemester',
+    createdBy: input.createdBy,
+    createdByProgram: input.createdByProgram,
     lines: originalLines.map((line) => ({
       accountNo: line.account_no,
       debitAmount: normalizeAmount(line.credit_amount) || undefined,
@@ -332,6 +337,7 @@ export function reverseJournalEntry(db: Database, input: { entryId: number; tran
   const accounts = accountMap(db);
   const entryNo = nextEntryNo(db);
   const prevHash = previousHash(db);
+  const actor = resolveActor({ createdBy: reversalPayload.createdBy, createdByProgram: reversalPayload.createdByProgram });
 
   const result = db.transaction(() => {
     const canonicalLines = reversalPayload.lines.map((line) => ({
@@ -352,8 +358,8 @@ export function reverseJournalEntry(db: Database, input: { entryId: number; tran
       amount_dkk: reversalPayload.amountDkk ?? null,
       fx_rate_to_dkk: reversalPayload.fxRateToDkk ?? null,
       rule_version: RULE_VERSION,
-      created_by: reversalPayload.createdBy ?? 'system',
-      created_by_program: reversalPayload.createdByProgram ?? 'rentemester',
+      created_by: actor.createdBy,
+      created_by_program: actor.createdByProgram,
       status: 'reversed',
       reversal_of_entry_id: original.id,
     };
@@ -377,8 +383,8 @@ export function reverseJournalEntry(db: Database, input: { entryId: number; tran
       reversalPayload.amountDkk ?? null,
       reversalPayload.fxRateToDkk ?? null,
       RULE_VERSION,
-      reversalPayload.createdBy ?? 'system',
-      reversalPayload.createdByProgram ?? 'rentemester',
+      actor.createdBy,
+      actor.createdByProgram,
       original.id,
       prevHash,
       entryHash,
@@ -393,11 +399,14 @@ export function reverseJournalEntry(db: Database, input: { entryId: number; tran
       insertLine.run(entry.id, account.id, line.debit_amount, line.credit_amount, line.vat_code, line.text);
     });
 
-    db.run(
-      "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('journal_reverse', 'journal_entry', ?, ?)",
-      String(entry.id),
-      `Reversed journal entry ${original.entry_no} with ${entry.entry_no}`
-    );
+    insertAuditLog(db, {
+      eventType: "journal_reverse",
+      entityType: "journal_entry",
+      entityId: entry.id,
+      message: `Reversed journal entry ${original.entry_no} with ${entry.entry_no}`,
+      createdBy: actor.createdBy,
+      createdByProgram: actor.createdByProgram,
+    });
 
     return { entryId: entry.id, entryNo: entry.entry_no, entryHash };
   })();

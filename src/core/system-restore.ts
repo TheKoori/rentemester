@@ -6,6 +6,7 @@ import { verifyAuditChain } from "./ledger";
 import { companyPaths, ensureCompanyDirs } from "./paths";
 import { backupManifestKeyPath, backupManifestSignaturePath } from "./system-backups";
 import type { BackupManifest, ManifestFile } from "./system-backups";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-BOOKKEEPING-RESTORE-001";
 
@@ -197,10 +198,12 @@ export function restoreSystemBackup(input: RestoreSystemBackupInput): RestoreSys
 
   const db = openDb(paths.db);
   try {
-    db.run(
-      "INSERT INTO audit_log (event_type, entity_type, entity_id, message, actor) VALUES ('system_restore', 'company', '1', ?, 'system')",
-      `Restored from backup ${manifest.backupId} (created ${manifest.createdAt}) at ${restoredAt}`,
-    );
+    insertAuditLog(db, {
+      eventType: "system_restore",
+      entityType: "company",
+      entityId: 1,
+      message: `Restored from backup ${manifest.backupId} (created ${manifest.createdAt}) at ${restoredAt}`,
+    });
   } finally {
     db.close();
   }

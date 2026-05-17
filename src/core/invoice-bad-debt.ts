@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { getInvoiceStatus } from "./invoice-payments";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-INVOICE-BAD-DEBT-WRITEOFF-001";
 const VAT_RULE_ID = "DK-VAT-BAD-DEBT-001";
@@ -102,11 +103,14 @@ export function writeOffInvoiceBadDebt(db: Database, input: WriteOffInvoiceBadDe
          RETURNING id`
       ).get(input.invoiceDocumentId, input.writeOffDate, grossAmount, netAmount, vatAmount, input.note ?? null, journal.entryId!) as { id: number };
 
-      db.run(
-        "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_bad_debt_writeoff', 'invoice_bad_debt_writeoff', ?, ?)",
-        String(writeOff.id),
-        `Wrote off bad debt ${grossAmount} on invoice ${invoice.invoice_no}`
-      );
+      insertAuditLog(db, {
+        eventType: "invoice_bad_debt_writeoff",
+        entityType: "invoice_bad_debt_writeoff",
+        entityId: writeOff.id,
+        message: `Wrote off bad debt ${grossAmount} on invoice ${invoice.invoice_no}`,
+        createdBy: input.createdBy,
+        createdByProgram: input.createdByProgram,
+      });
 
       const after = getInvoiceStatus(db, input.invoiceDocumentId, input.writeOffDate);
       if (!after.ok) throw new Error(JSON.stringify({ errors: after.errors }));

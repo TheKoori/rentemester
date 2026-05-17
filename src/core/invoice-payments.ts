@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { postJournalEntry } from "./ledger";
+import { insertAuditLog } from "./actor";
 
 export type ApplyInvoicePaymentInput = {
   invoiceDocumentId: number;
@@ -321,11 +322,14 @@ export function applyInvoicePayment(db: Database, input: ApplyInvoicePaymentInpu
          RETURNING id`
       ).get(input.invoiceDocumentId, input.bankTransactionId ?? null, journalEntryId, input.paymentDate, amount, input.note ?? null) as { id: number };
 
-      db.run(
-        "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_payment_apply', 'invoice_payment', ?, ?)",
-        String(paymentId.id),
-        `Applied payment ${amount} to invoice ${invoice.invoice_no}`
-      );
+      insertAuditLog(db, {
+        eventType: "invoice_payment_apply",
+        entityType: "invoice_payment",
+        entityId: paymentId.id,
+        message: `Applied payment ${amount} to invoice ${invoice.invoice_no}`,
+        createdBy: input.createdBy,
+        createdByProgram: input.createdByProgram,
+      });
 
       const after = getInvoiceStatus(db, input.invoiceDocumentId);
       if (!after.ok) throw new Error(JSON.stringify({ appliedRules: [RULE_ID], errors: after.errors }));

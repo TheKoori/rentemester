@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
 import { getInvoiceStatus } from "./invoice-payments";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-INVOICE-LATE-INTEREST-001";
 const REGISTER_RULE_ID = "DK-INVOICE-LATE-INTEREST-REGISTER-001";
@@ -135,11 +136,12 @@ export function registerInvoiceLateInterest(db: Database, input: RegisterInvoice
     input.note ?? null,
   ) as { id: number };
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_interest_register', 'invoice_interest_claim', ?, ?)",
-    String(inserted.id),
-    `Registered late interest ${round2(Number(calculation.accruedInterestAmount))} on invoice ${calculation.invoiceNumber}`
-  );
+  insertAuditLog(db, {
+    eventType: "invoice_interest_register",
+    entityType: "invoice_interest_claim",
+    entityId: inserted.id,
+    message: `Registered late interest ${round2(Number(calculation.accruedInterestAmount))} on invoice ${calculation.invoiceNumber}`,
+  });
 
   const statusAfter = getInvoiceStatus(db, input.invoiceDocumentId, input.asOfDate);
   return {
@@ -220,11 +222,14 @@ export function postInvoiceLateInterestToLedger(db: Database, input: PostInvoice
     journal.entryId,
   );
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_interest_post', 'invoice_interest_claim', ?, ?)",
-    String(claim.id),
-    `Posted late interest ${amount} for invoice ${claim.invoice_no} in journal entry ${journal.entryNo}`
-  );
+  insertAuditLog(db, {
+    eventType: "invoice_interest_post",
+    entityType: "invoice_interest_claim",
+    entityId: claim.id,
+    message: `Posted late interest ${amount} for invoice ${claim.invoice_no} in journal entry ${journal.entryNo}`,
+    createdBy: input.createdBy,
+    createdByProgram: input.createdByProgram,
+  });
 
   const statusAfter = getInvoiceStatus(db, claim.invoice_document_id, input.transactionDate ?? claim.claim_date);
   return {

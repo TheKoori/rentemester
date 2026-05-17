@@ -3,6 +3,7 @@ import { basename, extname, join } from "node:path";
 import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
 import { companyPaths } from "./paths";
+import { insertAuditLog } from "./actor";
 
 export type DocumentType = "purchase_sale" | "cash_register_receipt";
 export type DocumentExemptionCode = "FOREIGN_PHYSICAL_ONLY" | null;
@@ -179,11 +180,12 @@ export function ingestDocument(db: Database, companyRoot: string, filePath: stri
     metadata.exemptionCode ?? null,
   ) as { id: number };
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('document_ingest', 'document', ?, ?)",
-    String(result.id),
-    `Ingested supporting document ${documentNo} (${sha256})`
-  );
+  insertAuditLog(db, {
+    eventType: "document_ingest",
+    entityType: "document",
+    entityId: result.id,
+    message: `Ingested supporting document ${documentNo} (${sha256})`,
+  });
 
   return { ok: true, documentId: result.id, documentNo, sha256, storedPath };
 }

@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileS
 import { createHash } from "node:crypto";
 import { basename, join, relative } from "node:path";
 import type { Database } from "bun:sqlite";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-BOOKKEEPING-AUTHORITY-EXPORT-001";
 const FOUR_WEEKS_MS = 28 * 24 * 60 * 60 * 1000;
@@ -559,10 +560,12 @@ export function exportAuthorityPackage(db: Database, companyRoot: string, input:
   const manifestPath = join(exportDir, "manifest.json");
   writeExportJson(exportDir, manifestPath, manifest, outputs);
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('authority_export', 'company', '1', ?)",
-    `Exported bookkeeping package for ${input.periodStart}..${input.periodEnd} to ${packageRelativePath(input.outputDir, exportDir)}`,
-  );
+  insertAuditLog(db, {
+    eventType: "authority_export",
+    entityType: "company",
+    entityId: 1,
+    message: `Exported bookkeeping package for ${input.periodStart}..${input.periodEnd} to ${packageRelativePath(input.outputDir, exportDir)}`,
+  });
 
   return {
     ok: true,

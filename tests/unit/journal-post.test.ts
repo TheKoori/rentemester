@@ -95,6 +95,39 @@ describe("journal posting", () => {
     rmSync(inbox, { recursive: true, force: true });
   });
 
+  test("records a non-system actor from environment in journal entries and audit log", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-journal-actor-"));
+    const db = openDb(ensureCompanyDirs(root).db);
+    migrate(db);
+    seedAccounts(db);
+
+    const prevActor = process.env.RENTEMESTER_ACTOR;
+    const prevVia = process.env.RENTEMESTER_ACTOR_VIA;
+    process.env.RENTEMESTER_ACTOR = "agent:freja";
+    process.env.RENTEMESTER_ACTOR_VIA = "openclaw";
+
+    const posted = postJournalEntry(db, {
+      transactionDate: "2026-05-16",
+      text: "Owner contribution",
+      lines: [
+        { accountNo: "2000", debitAmount: 1000 },
+        { accountNo: "5000", creditAmount: 1000 }
+      ]
+    });
+
+    if (prevActor === undefined) delete process.env.RENTEMESTER_ACTOR; else process.env.RENTEMESTER_ACTOR = prevActor;
+    if (prevVia === undefined) delete process.env.RENTEMESTER_ACTOR_VIA; else process.env.RENTEMESTER_ACTOR_VIA = prevVia;
+
+    expect(posted.ok).toBe(true);
+    const entry = db.query("SELECT created_by, created_by_program FROM journal_entries WHERE id = ?").get(posted.entryId!) as any;
+    expect(entry).toEqual({ created_by: "agent:freja", created_by_program: "openclaw" });
+    const audit = db.query("SELECT actor FROM audit_log WHERE event_type = 'journal_post' ORDER BY id DESC LIMIT 1").get() as any;
+    expect(audit.actor).toBe("agent:freja via openclaw");
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test("requires document evidence for expense or income postings and hashes lines into the audit chain", () => {
     const root = mkdtempSync(join(tmpdir(), "rentemester-journal-"));
     const inbox = mkdtempSync(join(tmpdir(), "rentemester-inbox-"));

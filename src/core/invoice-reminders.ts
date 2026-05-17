@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
 import { getInvoiceStatus } from "./invoice-payments";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-INVOICE-REMINDER-FEE-001";
 const BOOKKEEPING_RULE_ID = "DK-INVOICE-REMINDER-FEE-BOOKKEEPING-001";
@@ -105,11 +106,12 @@ export function registerInvoiceReminder(db: Database, input: RegisterInvoiceRemi
      RETURNING id`
   ).get(input.invoiceDocumentId, input.reminderDate, feeAmount, input.note ?? null) as { id: number };
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_reminder_register', 'invoice_reminder', ?, ?)",
-    String(inserted.id),
-    `Registered reminder fee ${feeAmount} on invoice ${invoice.invoice_no}`
-  );
+  insertAuditLog(db, {
+    eventType: "invoice_reminder_register",
+    entityType: "invoice_reminder",
+    entityId: inserted.id,
+    message: `Registered reminder fee ${feeAmount} on invoice ${invoice.invoice_no}`,
+  });
 
   const totalReminderFees = round2(reminders.reduce((sum, reminder) => sum + Number(reminder.fee_amount), 0) + feeAmount);
   return {
@@ -193,11 +195,14 @@ export function postInvoiceReminderToLedger(db: Database, input: PostInvoiceRemi
     journal.entryId,
   );
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_reminder_post', 'invoice_reminder', ?, ?)",
-    String(reminder.id),
-    `Posted reminder fee ${amount} for invoice ${reminder.invoice_no} in journal entry ${journal.entryNo}`
-  );
+  insertAuditLog(db, {
+    eventType: "invoice_reminder_post",
+    entityType: "invoice_reminder",
+    entityId: reminder.id,
+    message: `Posted reminder fee ${amount} for invoice ${reminder.invoice_no} in journal entry ${journal.entryNo}`,
+    createdBy: input.createdBy,
+    createdByProgram: input.createdByProgram,
+  });
 
   const statusAfter = getInvoiceStatus(db, reminder.invoice_document_id, input.transactionDate ?? reminder.reminder_date);
   return {

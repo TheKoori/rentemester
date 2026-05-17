@@ -5,6 +5,7 @@ import type { Database } from "bun:sqlite";
 import { companyPaths } from "./paths";
 import { validateInvoice, type InvoicePayload } from "./invoice";
 import { promoteTempFile, removeIfExists, writeTempFileFor } from "./atomic-file";
+import { insertAuditLog } from "./actor";
 
 export type IssueInvoiceResult = {
   ok: boolean;
@@ -82,11 +83,12 @@ export function issueInvoice(db: Database, companyRoot: string, payload: Invoice
     serialized,
   ) as { id: number };
 
-    db.run(
-      "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_issue', 'document', ?, ?)",
-      String(result.id),
-      `Issued invoice ${invoiceNumber}`
-    );
+    insertAuditLog(db, {
+      eventType: "invoice_issue",
+      entityType: "document",
+      entityId: result.id,
+      message: `Issued invoice ${invoiceNumber}`,
+    });
 
     promoteTempFile(tempPath, storedPath);
     return { ok: true, documentId: result.id, invoiceNumber, storedPath, sha256: hash, appliedRules, errors: [] };

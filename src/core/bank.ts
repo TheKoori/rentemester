@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import type { Database } from "bun:sqlite";
 import { companyPaths } from "./paths";
+import { insertAuditLog } from "./actor";
 
 export type BankImportRow = {
   transactionDate: string;
@@ -150,11 +151,12 @@ export function importBankCsv(db: Database, companyRoot: string, csvPath: string
       );
       imported += 1;
     }
-    db.run(
-      "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('bank_import', 'bank_transaction_batch', ?, ?)",
-      importBatchId,
-      `Imported ${imported} bank transactions from ${basename(csvPath)}; skipped ${skippedDuplicates} duplicates`
-    );
+    insertAuditLog(db, {
+      eventType: "bank_import",
+      entityType: "bank_transaction_batch",
+      entityId: importBatchId,
+      message: `Imported ${imported} bank transactions from ${basename(csvPath)}; skipped ${skippedDuplicates} duplicates`,
+    });
   })();
 
   return { ok: true, importBatchId, imported, skippedDuplicates, sourceFileHash, errors: [] };

@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
 import { getInvoiceStatus } from "./invoice-payments";
+import { insertAuditLog } from "./actor";
 
 const RULE_ID = "DK-INVOICE-LATE-COMPENSATION-001";
 const REGISTER_RULE_ID = "DK-INVOICE-LATE-COMPENSATION-REGISTER-001";
@@ -149,11 +150,12 @@ export function registerInvoiceLateCompensation(db: Database, input: RegisterInv
      RETURNING id`
   ).get(input.invoiceDocumentId, input.asOfDate, round2(Number(assessment.compensationAmountDkk)), input.note ?? null) as { id: number };
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_compensation_register', 'invoice_compensation_claim', ?, ?)",
-    String(inserted.id),
-    `Registered compensation claim ${round2(Number(assessment.compensationAmountDkk))} on invoice ${assessment.invoiceNumber}`
-  );
+  insertAuditLog(db, {
+    eventType: "invoice_compensation_register",
+    entityType: "invoice_compensation_claim",
+    entityId: inserted.id,
+    message: `Registered compensation claim ${round2(Number(assessment.compensationAmountDkk))} on invoice ${assessment.invoiceNumber}`,
+  });
 
   const statusAfter = getInvoiceStatus(db, input.invoiceDocumentId, input.asOfDate);
   return {
@@ -239,11 +241,14 @@ export function postInvoiceLateCompensationToLedger(db: Database, input: PostInv
     journal.entryId,
   );
 
-  db.run(
-    "INSERT INTO audit_log (event_type, entity_type, entity_id, message) VALUES ('invoice_compensation_post', 'invoice_compensation_claim', ?, ?)",
-    String(claim.id),
-    `Posted compensation claim ${amount} for invoice ${claim.invoice_no} in journal entry ${journal.entryNo}`
-  );
+  insertAuditLog(db, {
+    eventType: "invoice_compensation_post",
+    entityType: "invoice_compensation_claim",
+    entityId: claim.id,
+    message: `Posted compensation claim ${amount} for invoice ${claim.invoice_no} in journal entry ${journal.entryNo}`,
+    createdBy: input.createdBy,
+    createdByProgram: input.createdByProgram,
+  });
 
   const statusAfter = getInvoiceStatus(db, claim.invoice_document_id, input.transactionDate ?? claim.claim_date);
   return {
