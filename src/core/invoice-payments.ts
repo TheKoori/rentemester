@@ -68,6 +68,16 @@ export type InvoiceStatusResult = {
     journalEntryId: number;
     note: string | null;
   }>;
+  badDebtRecoveries?: Array<{
+    recoveryId: number;
+    recoveryDate: string;
+    grossAmount: number;
+    netAmount: number;
+    vatAmount: number;
+    bankTransactionId: number;
+    journalEntryId: number;
+    note: string | null;
+  }>;
   reminders?: Array<{
     reminderId: number;
     reminderDate: string;
@@ -97,6 +107,8 @@ export type InvoiceStatusResult = {
   totalInterestClaims?: number;
   totalClaimPayments?: number;
   totalBadDebtWrittenOff?: number;
+  totalBadDebtRecovered?: number;
+  remainingBadDebtExposure?: number;
   errors: string[];
 };
 
@@ -161,6 +173,11 @@ export function getInvoiceStatus(db: Database, invoiceDocumentId: number, asOfDa
      FROM invoice_bad_debt_writeoffs WHERE invoice_document_id = ? ORDER BY id ASC`
   ).all(invoiceDocumentId) as Array<{ id: number; writeoff_date: string; gross_amount: number; net_amount: number; vat_amount: number; journal_entry_id: number; note: string | null }>;
 
+  const badDebtRecoveries = db.query(
+    `SELECT id, recovery_date, gross_amount, net_amount, vat_amount, bank_transaction_id, journal_entry_id, note
+     FROM invoice_bad_debt_recoveries WHERE invoice_document_id = ? ORDER BY id ASC`
+  ).all(invoiceDocumentId) as Array<{ id: number; recovery_date: string; gross_amount: number; net_amount: number; vat_amount: number; bank_transaction_id: number; journal_entry_id: number; note: string | null }>;
+
   const reminders = db.query(
     `SELECT r.id, r.reminder_date, r.fee_amount, r.note, p.journal_entry_id
      FROM invoice_reminders r
@@ -191,6 +208,8 @@ export function getInvoiceStatus(db: Database, invoiceDocumentId: number, asOfDa
   const totalInterestClaims = round2(interestClaims.reduce((sum, c) => sum + Number(c.amount_dkk), 0));
   const totalClaimPayments = round2(claimPayments.reduce((sum, p) => sum + Number(p.amount), 0));
   const totalBadDebtWrittenOff = round2(badDebtWriteOffs.reduce((sum, w) => sum + Number(w.gross_amount), 0));
+  const totalBadDebtRecovered = round2(badDebtRecoveries.reduce((sum, r) => sum + Number(r.gross_amount), 0));
+  const remainingBadDebtExposure = round2(Math.max(0, totalBadDebtWrittenOff - totalBadDebtRecovered));
   const openBalance = round2(grossAmount - creditedAmount - paidAmount + refundedAmount - totalBadDebtWrittenOff);
   const claimOpenBalance = round2(openBalance + totalReminderFees + totalCompensationClaims + totalInterestClaims - totalClaimPayments);
   const dueDate = typeof payload?.dueDate === "string" ? payload.dueDate : undefined;
@@ -206,7 +225,7 @@ export function getInvoiceStatus(db: Database, invoiceDocumentId: number, asOfDa
         ? "refunded"
         : creditedAmount === grossAmount && paidAmount === 0
           ? "credited"
-          : totalBadDebtWrittenOff > 0
+          : remainingBadDebtExposure > 0
             ? "written_off"
             : "paid";
 
@@ -229,6 +248,7 @@ export function getInvoiceStatus(db: Database, invoiceDocumentId: number, asOfDa
     refunds: refunds.map((r) => ({ refundId: r.id, refundDate: r.refund_date, amount: round2(Number(r.amount)), bankTransactionId: r.bank_transaction_id, note: r.note })),
     claimPayments: claimPayments.map((p) => ({ claimPaymentId: p.id, paymentDate: p.payment_date, amount: round2(Number(p.amount)), bankTransactionId: p.bank_transaction_id, note: p.note })),
     badDebtWriteOffs: badDebtWriteOffs.map((w) => ({ writeOffId: w.id, writeOffDate: w.writeoff_date, grossAmount: round2(Number(w.gross_amount)), netAmount: round2(Number(w.net_amount)), vatAmount: round2(Number(w.vat_amount)), journalEntryId: Number(w.journal_entry_id), note: w.note })),
+    badDebtRecoveries: badDebtRecoveries.map((r) => ({ recoveryId: r.id, recoveryDate: r.recovery_date, grossAmount: round2(Number(r.gross_amount)), netAmount: round2(Number(r.net_amount)), vatAmount: round2(Number(r.vat_amount)), bankTransactionId: Number(r.bank_transaction_id), journalEntryId: Number(r.journal_entry_id), note: r.note })),
     reminders: reminders.map((r) => ({ reminderId: r.id, reminderDate: r.reminder_date, feeAmount: round2(Number(r.fee_amount)), note: r.note, journalEntryId: r.journal_entry_id == null ? null : Number(r.journal_entry_id) })),
     compensationClaims: compensationClaims.map((c) => ({ claimId: c.id, claimDate: c.claim_date, amountDkk: round2(Number(c.amount_dkk)), note: c.note, journalEntryId: c.journal_entry_id == null ? null : Number(c.journal_entry_id) })),
     interestClaims: interestClaims.map((c) => ({ claimId: c.id, claimDate: c.claim_date, amountDkk: round2(Number(c.amount_dkk)), referenceRatePercent: round2(Number(c.reference_rate_percent)), annualInterestRatePercent: round2(Number(c.annual_interest_rate_percent)), overdueDays: Number(c.overdue_days), note: c.note, journalEntryId: c.journal_entry_id == null ? null : Number(c.journal_entry_id) })),
@@ -237,6 +257,8 @@ export function getInvoiceStatus(db: Database, invoiceDocumentId: number, asOfDa
     totalInterestClaims,
     totalClaimPayments,
     totalBadDebtWrittenOff,
+    totalBadDebtRecovered,
+    remainingBadDebtExposure,
     errors: [],
   };
 }

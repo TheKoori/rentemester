@@ -232,6 +232,22 @@ CREATE TABLE IF NOT EXISTS invoice_bad_debt_writeoffs (
   FOREIGN KEY(journal_entry_id) REFERENCES journal_entries(id)
 );
 
+CREATE TABLE IF NOT EXISTS invoice_bad_debt_recoveries (
+  id INTEGER PRIMARY KEY,
+  invoice_document_id INTEGER NOT NULL,
+  bank_transaction_id INTEGER NOT NULL UNIQUE,
+  recovery_date TEXT NOT NULL,
+  gross_amount NUMERIC NOT NULL CHECK(gross_amount > 0),
+  net_amount NUMERIC NOT NULL CHECK(net_amount >= 0),
+  vat_amount NUMERIC NOT NULL CHECK(vat_amount >= 0),
+  note TEXT,
+  journal_entry_id INTEGER NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(invoice_document_id) REFERENCES documents(id),
+  FOREIGN KEY(bank_transaction_id) REFERENCES bank_transactions(id),
+  FOREIGN KEY(journal_entry_id) REFERENCES journal_entries(id)
+);
+
 CREATE TABLE IF NOT EXISTS exceptions (
   id INTEGER PRIMARY KEY,
   type TEXT NOT NULL,
@@ -391,4 +407,16 @@ CREATE TRIGGER IF NOT EXISTS invoice_bad_debt_writeoffs_no_delete
 BEFORE DELETE ON invoice_bad_debt_writeoffs
 BEGIN
   SELECT RAISE(ABORT, 'invoice bad-debt writeoffs are append-only; add a correcting journal entry instead');
+END;
+
+CREATE TRIGGER IF NOT EXISTS invoice_bad_debt_recoveries_no_update
+BEFORE UPDATE ON invoice_bad_debt_recoveries
+BEGIN
+  SELECT RAISE(ABORT, 'invoice bad-debt recoveries are append-only; add a correcting journal entry instead');
+END;
+
+CREATE TRIGGER IF NOT EXISTS invoice_bad_debt_recoveries_no_delete
+BEFORE DELETE ON invoice_bad_debt_recoveries
+BEGIN
+  SELECT RAISE(ABORT, 'invoice bad-debt recoveries are append-only; add a correcting journal entry instead');
 END;

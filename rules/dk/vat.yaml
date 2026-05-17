@@ -28,6 +28,11 @@ vat_codes:
     rate: 0.25
     reverse_charge: false
     deductible_percentage: 1.0
+  - code: DK_BAD_DEBT_RECOVERY_25
+    type: sale_adjustment
+    rate: 0.25
+    reverse_charge: false
+    deductible_percentage: 1.0
   - code: NO_VAT
     type: none
     rate: 0
@@ -100,3 +105,19 @@ rules:
         - bad_debt_vat_relief_on_non_vat_or_nonstandard_invoice
         - bad_debt_writeoff_above_open_principal_balance
     explanation: When an issued Danish standard-rated invoice becomes an established bad debt, Rentemester must write off the gross receivable, expense the deductible loss basis, and reduce output VAT deterministically for the same loss amount.
+  - rule_id: DK-VAT-BAD-DEBT-RECOVERY-001
+    name: Customer recovery after prior bad-debt VAT relief must restore output VAT for the recovered standard-rated sales basis
+    category: vat_posting
+    source_id: DK-MOMSLOVEN-2024-209
+    severity: hard_stop
+    machine_rule:
+      condition: vat_code == 'DK_BAD_DEBT_RECOVERY_25'
+      require:
+        - prior_bad_debt_relief_reference
+        - recovery_base_equals_80pct_of_recovered_gross_amount
+        - output_vat_restored_at_standard_rate
+        - bank_debit_for_recovered_gross_amount
+      forbid:
+        - bad_debt_recovery_without_prior_relief
+        - bad_debt_recovery_above_unrecovered_written_off_balance
+    explanation: If a customer later pays an amount that was previously treated as an established bad debt, Rentemester must deterministically restore output VAT and reverse the bad-debt loss basis for the recovered amount.

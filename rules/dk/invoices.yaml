@@ -343,6 +343,48 @@ rules:
         - bad_debt_writeoff_without_open_principal_balance
         - bad_debt_writeoff_above_open_principal_balance
     explanation: When a customer invoice loss is established, Rentemester must write off only the remaining principal receivable through an append-only invoice-linked correction entry so the audit trail remains deterministic.
+  - rule_id: DK-INVOICE-BAD-DEBT-CORRECTED-BALANCE-001
+    name: Bad-debt write-offs must respect linked credit notes and only use the corrected remaining invoice balance
+    category: invoice_lifecycle
+    source_id: DK-MOMSBEKENDTGORELSEN-2023-1435
+    severity: hard_stop
+    machine_rule:
+      require:
+        - original_invoice_reference
+        - credited_amount_in_bad_debt_balance_calculation
+        - bad_debt_writeoff_against_corrected_open_balance
+      forbid:
+        - bad_debt_writeoff_above_corrected_open_balance
+    explanation: If an issued invoice has already been reduced by one or more linked credit notes, Rentemester must base any later bad-debt write-off only on the corrected remaining receivable, so the VAT and receivable correction are not duplicated.
+  - rule_id: DK-INVOICE-BAD-DEBT-RECOVERY-001
+    name: Customer payments received after a prior invoice write-off must be recorded as append-only bad-debt recoveries against the bank receipt
+    category: invoice_lifecycle
+    source_id: DK-BOGFORINGSLOVEN-2022-700
+    severity: hard_stop
+    machine_rule:
+      require:
+        - issued_invoice_reference
+        - incoming_bank_transaction_reference
+        - prior_bad_debt_writeoff_reference
+        - positive_unrecovered_written_off_balance
+        - append_only_bad_debt_recovery_record
+      forbid:
+        - bad_debt_recovery_without_prior_writeoff
+        - bad_debt_recovery_above_unrecovered_written_off_balance
+    explanation: If a customer later pays all or part of a previously written-off invoice amount, Rentemester must capture the recovery as its own append-only bank-linked correction so the original write-off and later recovery remain separately traceable.
+  - rule_id: DK-INVOICE-BAD-DEBT-RECOVERY-CORRECTED-BALANCE-001
+    name: Bad-debt recoveries must respect prior credit notes and only restore the corrected written-off balance
+    category: invoice_lifecycle
+    source_id: DK-MOMSBEKENDTGORELSEN-2023-1435
+    severity: hard_stop
+    machine_rule:
+      require:
+        - original_invoice_reference
+        - credited_amount_in_recovery_exposure_calculation
+        - bad_debt_recovery_against_corrected_written_off_balance
+      forbid:
+        - bad_debt_recovery_above_unrecovered_corrected_written_off_balance
+    explanation: If an invoice was partly corrected by linked credit notes before the bad-debt write-off, any later recovery must only restore the remaining corrected write-off amount, so credit-note and bad-debt corrections are not double-counted.
   - rule_id: DK-INVOICE-LOCK-001
     name: Issued invoices cannot be modified
     category: invoice_integrity

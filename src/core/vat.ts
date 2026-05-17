@@ -14,6 +14,7 @@ export type VatPeriodReport = {
   reverseChargePurchaseBase: number;
   representationPurchaseBase: number;
   badDebtReliefBase25: number;
+  badDebtRecoveryBase25: number;
   journalEntryCount: number;
   linesConsidered: number;
   errors: string[];
@@ -144,6 +145,7 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
       reverseChargePurchaseBase: 0,
       representationPurchaseBase: 0,
       badDebtReliefBase25: 0,
+      badDebtRecoveryBase25: 0,
       journalEntryCount: 0,
       linesConsidered: 0,
       errors,
@@ -173,6 +175,7 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
   let reverseChargePurchaseBase = 0;
   let representationPurchaseBase = 0;
   let badDebtReliefBase25 = 0;
+  let badDebtRecoveryBase25 = 0;
   const entryIds = new Set<number>();
 
   for (const row of rows) {
@@ -188,6 +191,7 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
     if (row.vat_code === "EU_SERVICE_REVERSE_CHARGE") reverseChargePurchaseBase += debit - credit;
     if (row.vat_code === "REPRESENTATION_SPECIAL") representationPurchaseBase += debit - credit;
     if (row.vat_code === "DK_BAD_DEBT_25") badDebtReliefBase25 += debit - credit;
+    if (row.vat_code === "DK_BAD_DEBT_RECOVERY_25") badDebtRecoveryBase25 += credit - debit;
   }
 
   outputVat = round2(outputVat);
@@ -197,6 +201,7 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
   reverseChargePurchaseBase = round2(reverseChargePurchaseBase);
   representationPurchaseBase = round2(representationPurchaseBase);
   badDebtReliefBase25 = round2(badDebtReliefBase25);
+  badDebtRecoveryBase25 = round2(badDebtRecoveryBase25);
 
   return {
     ok: true,
@@ -211,6 +216,7 @@ export function buildVatReport(db: Database, periodStart: string, periodEnd: str
     reverseChargePurchaseBase,
     representationPurchaseBase,
     badDebtReliefBase25,
+    badDebtRecoveryBase25,
     journalEntryCount: entryIds.size,
     linesConsidered: rows.length,
     errors: [],
