@@ -147,6 +147,7 @@ Rentemester er i en tidlig teknisk prototype. Den nuværende version har allered
 - deterministisk registrering og bogføring af rykkergebyrer med lovbestemt maksimum 100 kr., maks. 3 rykkere og mindst 10 dages mellemrum
 - deterministisk vurdering, registrering og bogføring af fast kompensationskrav ved forsinket betaling på overfaldne erhvervsfakturaer, inkl. lovbestemt standardbeløb 310 kr. fra 2013-03-01
 - deterministisk tabsafskrivning på uerholdelige standardmoms-fakturaer med momsregulering på den fradragsberettigede tabsbase
+- deterministisk recovery af tidligere tabsafskrevne standardmoms-fakturaer med bankspor og genopretning af salgsmoms på den modtagne del
 - bogføring af journalposter med krav om balance, inkl. udenlandsk valuta med gemt omregningsfaktor og DKK-grundlag
 - tilbageførsel af posteringer via reversal — ikke sletning
 - momsrapport for periode

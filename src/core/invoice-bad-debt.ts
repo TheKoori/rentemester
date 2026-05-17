@@ -3,6 +3,7 @@ import { getInvoiceStatus } from "./invoice-payments";
 import { postJournalEntry, type JournalPostResult } from "./ledger";
 
 const RULE_ID = "DK-INVOICE-BAD-DEBT-WRITEOFF-001";
+const CORRECTION_BALANCE_RULE_ID = "DK-INVOICE-BAD-DEBT-CORRECTED-BALANCE-001";
 const VAT_RULE_ID = "DK-VAT-BAD-DEBT-001";
 
 export type WriteOffInvoiceBadDebtInput = {
@@ -37,7 +38,7 @@ export function writeOffInvoiceBadDebt(db: Database, input: WriteOffInvoiceBadDe
   if (!Number.isInteger(input.invoiceDocumentId) || input.invoiceDocumentId <= 0) errors.push("invoiceDocumentId must be a positive integer");
   if (!looksLikeIsoDate(input.writeOffDate)) errors.push("writeOffDate must be YYYY-MM-DD");
   if (input.grossAmount !== undefined && (!Number.isFinite(input.grossAmount) || input.grossAmount <= 0)) errors.push("grossAmount must be a positive number when present");
-  if (errors.length > 0) return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors };
+  if (errors.length > 0) return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors };
 
   const invoice = db.query(
     `SELECT id, invoice_no, amount_inc_vat, vat_amount, currency, payload_json, document_type
@@ -51,29 +52,29 @@ export function writeOffInvoiceBadDebt(db: Database, input: WriteOffInvoiceBadDe
     payload_json: string | null;
     document_type: string;
   } | null;
-  if (!invoice) return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: [`invoice document ${input.invoiceDocumentId} does not exist`] };
-  if (invoice.document_type !== "issued_invoice") return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: [`document ${input.invoiceDocumentId} is not an issued invoice`] };
-  if ((invoice.currency ?? "DKK") !== "DKK") return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: ["only DKK standard-rated issued invoices are supported in the current bad-debt flow"] };
+  if (!invoice) return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: [`invoice document ${input.invoiceDocumentId} does not exist`] };
+  if (invoice.document_type !== "issued_invoice") return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: [`document ${input.invoiceDocumentId} is not an issued invoice`] };
+  if ((invoice.currency ?? "DKK") !== "DKK") return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: ["only DKK standard-rated issued invoices are supported in the current bad-debt flow"] };
 
   const payload = invoice.payload_json ? JSON.parse(invoice.payload_json) : null;
   if (payload?.vatTreatment !== "standard") {
-    return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: ["bad-debt VAT relief currently requires a standard-rated issued invoice"] };
+    return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: ["bad-debt VAT relief currently requires a standard-rated issued invoice"] };
   }
 
   const grossInvoiceAmount = round2(Number(invoice.amount_inc_vat ?? 0));
   const originalVatAmount = round2(Number(invoice.vat_amount ?? 0));
   if (!(grossInvoiceAmount > 0) || !(originalVatAmount > 0)) {
-    return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: ["bad-debt VAT relief requires a positive gross invoice amount and VAT amount"] };
+    return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: ["bad-debt VAT relief requires a positive gross invoice amount and VAT amount"] };
   }
 
   const status = getInvoiceStatus(db, input.invoiceDocumentId, input.writeOffDate);
-  if (!status.ok) return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: status.errors };
+  if (!status.ok) return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: status.errors };
   const openBalance = round2(Number(status.openBalance ?? 0));
-  if (!(openBalance > 0)) return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: [`invoice ${invoice.invoice_no} has no open principal balance to write off`] };
+  if (!(openBalance > 0)) return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: [`invoice ${invoice.invoice_no} has no corrected open principal balance to write off`] };
 
   const grossAmount = round2(input.grossAmount ?? openBalance);
   if (grossAmount > openBalance) {
-    return { ok: false, appliedRules: [RULE_ID, VAT_RULE_ID], errors: [`bad-debt write-off amount ${grossAmount} exceeds open principal balance ${openBalance}`] };
+    return { ok: false, appliedRules: [RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID], errors: [`bad-debt write-off amount ${grossAmount} exceeds corrected open principal balance ${openBalance}`] };
   }
 
   const vatRatio = originalVatAmount / grossInvoiceAmount;
@@ -120,7 +121,7 @@ export function writeOffInvoiceBadDebt(db: Database, input: WriteOffInvoiceBadDe
         vatAmount,
         openBalance: after.openBalance,
         claimOpenBalance: after.claimOpenBalance,
-        appliedRules: [...new Set([RULE_ID, VAT_RULE_ID, ...(journal.appliedRules ?? [])])],
+        appliedRules: [...new Set([RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID, ...(journal.appliedRules ?? [])])],
       };
     })();
     return result;
@@ -130,7 +131,7 @@ export function writeOffInvoiceBadDebt(db: Database, input: WriteOffInvoiceBadDe
     })() : null;
     return {
       ok: false,
-      appliedRules: [...new Set([RULE_ID, VAT_RULE_ID, ...((parsed?.appliedRules as string[] | undefined) ?? [])])],
+      appliedRules: [...new Set([RULE_ID, CORRECTION_BALANCE_RULE_ID, VAT_RULE_ID, ...((parsed?.appliedRules as string[] | undefined) ?? [])])],
       errors: (parsed?.errors as string[] | undefined) ?? [String(error)],
     };
   }

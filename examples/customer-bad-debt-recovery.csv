@@ -1,0 +1,2 @@
+transaction_date,booking_date,text,amount,currency,reference
+2026-07-15,2026-07-15,Late customer recovery,500,DKK,INV-0001-RECOVERY

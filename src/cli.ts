@@ -20,6 +20,7 @@ import { calculateInvoiceLateInterest, postInvoiceLateInterestToLedger, register
 import { calculateInvoiceLateCompensation, postInvoiceLateCompensationToLedger, registerInvoiceLateCompensation } from "./core/invoice-compensation";
 import { postInvoiceReminderToLedger, registerInvoiceReminder } from "./core/invoice-reminders";
 import { writeOffInvoiceBadDebt } from "./core/invoice-bad-debt";
+import { recoverInvoiceBadDebtFromBank } from "./core/invoice-bad-debt-recovery";
 import { createSystemBackup, getBackupComplianceStatus } from "./core/system-backups";
 import { exportAuthorityPackage } from "./core/authority-export";
 import { restoreSystemBackup } from "./core/system-restore";
@@ -30,7 +31,7 @@ function arg(name: string, fallback?: string) {
 }
 function companyRoot() { return arg("--company", process.env.RENTEMESTER_COMPANY ?? "/company")!; }
 function usage() {
-  console.log(`Rentemester v0.0.1\n\nCommands:\n  init --company <path>\n  system healthcheck --company <path>\n  system backup --company <path> [--at <ISO-8601>]\n  system backup-status --company <path> [--as-of <ISO-8601>]\n  system restore-backup --backup-dir <dir> --target-company <path>\n  system export-authority --company <path> --from <YYYY-MM-DD> --to <YYYY-MM-DD> --out <dir> [--requested-at <ISO-8601>] [--requester <name>]\n  audit verify --company <path>\n  accounts list --company <path>\n  exceptions list --company <path>\n  invoice validate --input <file.json>\n  invoice issue --company <path> --input <file.json>\n  invoice credit-note --company <path> --input <file.json>\n  invoice post --company <path> --document-id <n>\n  invoice settle-bank --company <path> --input <file.json>\n  invoice settle-claim-bank --company <path> --input <file.json>\n  invoice write-off-bad-debt --company <path> --input <file.json>\n  invoice refund-bank --company <path> --input <file.json>\n  invoice apply-payment --company <path> --input <file.json>\n  invoice remind --company <path> --document-id <n> --date <YYYY-MM-DD> [--fee <n>] [--note <text>]\n  invoice post-reminder --company <path> --document-id <n> [--reminder-id <n>] [--date <YYYY-MM-DD>]\n  invoice status --company <path> --document-id <n> [--as-of <YYYY-MM-DD>]\n  invoice interest --company <path> --document-id <n> --as-of <YYYY-MM-DD> --reference-rate <pct>\n  invoice claim-interest --company <path> --document-id <n> --as-of <YYYY-MM-DD> --reference-rate <pct> [--note <text>]\n  invoice post-interest --company <path> --document-id <n> [--claim-id <n>] [--date <YYYY-MM-DD>]\n  invoice compensation --company <path> --document-id <n> --as-of <YYYY-MM-DD> [--amount-dkk <n>]\n  invoice claim-compensation --company <path> --document-id <n> --as-of <YYYY-MM-DD> [--amount-dkk <n>] [--note <text>]\n  invoice post-compensation --company <path> --document-id <n> [--date <YYYY-MM-DD>]\n  documents ingest --company <path> --file <path> --metadata <file.json>\n  documents list --company <path>\n  bank import --company <path> --file <transactions.csv>\n  bank list --company <path>\n  reconcile bank --company <path> --from <YYYY-MM-DD> --to <YYYY-MM-DD>\n  vat report --company <path> --from <YYYY-MM-DD> --to <YYYY-MM-DD>\n  vat post-eu-service-purchase --company <path> --input <file.json>\n  vat post-representation-purchase --company <path> --input <file.json>\n  journal post --company <path> --input <file.json>\n  journal reverse --company <path> --entry-id <n> --date <YYYY-MM-DD> --reason <text>\n  journal list --company <path>`);
+  console.log(`Rentemester v0.0.1\n\nCommands:\n  init --company <path>\n  system healthcheck --company <path>\n  system backup --company <path> [--at <ISO-8601>]\n  system backup-status --company <path> [--as-of <ISO-8601>]\n  system restore-backup --backup-dir <dir> --target-company <path>\n  system export-authority --company <path> --from <YYYY-MM-DD> --to <YYYY-MM-DD> --out <dir> [--requested-at <ISO-8601>] [--requester <name>]\n  audit verify --company <path>\n  accounts list --company <path>\n  exceptions list --company <path>\n  invoice validate --input <file.json>\n  invoice issue --company <path> --input <file.json>\n  invoice credit-note --company <path> --input <file.json>\n  invoice post --company <path> --document-id <n>\n  invoice settle-bank --company <path> --input <file.json>\n  invoice settle-claim-bank --company <path> --input <file.json>\n  invoice write-off-bad-debt --company <path> --input <file.json>\n  invoice recover-bad-debt-bank --company <path> --input <file.json>\n  invoice refund-bank --company <path> --input <file.json>\n  invoice apply-payment --company <path> --input <file.json>\n  invoice remind --company <path> --document-id <n> --date <YYYY-MM-DD> [--fee <n>] [--note <text>]\n  invoice post-reminder --company <path> --document-id <n> [--reminder-id <n>] [--date <YYYY-MM-DD>]\n  invoice status --company <path> --document-id <n> [--as-of <YYYY-MM-DD>]\n  invoice interest --company <path> --document-id <n> --as-of <YYYY-MM-DD> --reference-rate <pct>\n  invoice claim-interest --company <path> --document-id <n> --as-of <YYYY-MM-DD> --reference-rate <pct> [--note <text>]\n  invoice post-interest --company <path> --document-id <n> [--claim-id <n>] [--date <YYYY-MM-DD>]\n  invoice compensation --company <path> --document-id <n> --as-of <YYYY-MM-DD> [--amount-dkk <n>]\n  invoice claim-compensation --company <path> --document-id <n> --as-of <YYYY-MM-DD> [--amount-dkk <n>] [--note <text>]\n  invoice post-compensation --company <path> --document-id <n> [--date <YYYY-MM-DD>]\n  documents ingest --company <path> --file <path> --metadata <file.json>\n  documents list --company <path>\n  bank import --company <path> --file <transactions.csv>\n  bank list --company <path>\n  reconcile bank --company <path> --from <YYYY-MM-DD> --to <YYYY-MM-DD>\n  vat report --company <path> --from <YYYY-MM-DD> --to <YYYY-MM-DD>\n  vat post-eu-service-purchase --company <path> --input <file.json>\n  vat post-representation-purchase --company <path> --input <file.json>\n  journal post --company <path> --input <file.json>\n  journal reverse --company <path> --entry-id <n> --date <YYYY-MM-DD> --reason <text>\n  journal list --company <path>`);
 }
 
 const [cmd, sub] = Bun.argv.slice(2).filter(a => !a.startsWith("--") && !Bun.argv[Bun.argv.indexOf(a)-1]?.startsWith("--"));
@@ -207,6 +208,19 @@ else if (cmd === "invoice" && sub === "write-off-bad-debt") {
   const db = openDb(companyPaths(companyRoot()).db); migrate(db);
   const payload = JSON.parse(readFileSync(input, "utf8"));
   const result = writeOffInvoiceBadDebt(db, payload);
+  console.log(JSON.stringify(result, null, 2));
+  db.close();
+  if (!result.ok) process.exit(1);
+}
+else if (cmd === "invoice" && sub === "recover-bad-debt-bank") {
+  const input = arg("--input");
+  if (!input) {
+    console.error("Missing required --input <file.json>");
+    process.exit(2);
+  }
+  const db = openDb(companyPaths(companyRoot()).db); migrate(db);
+  const payload = JSON.parse(readFileSync(input, "utf8"));
+  const result = recoverInvoiceBadDebtFromBank(db, payload);
   console.log(JSON.stringify(result, null, 2));
   db.close();
   if (!result.ok) process.exit(1);
