@@ -22,19 +22,30 @@ describe("invoice compensation CLI", () => {
       totals: { netAmount: 1000, vatRate: 0.25, vatAmount: 250, grossAmount: 1250 },
       currency: "DKK"
     }, null, 2));
+
+    await Bun.$`bun run src/cli.ts init --company ${company}`.quiet();
+    const issueProc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "issue", "--company", company, "--input", invoiceInput], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const issueStdout = await new Response(issueProc.stdout).text();
+    const issueStderr = await new Response(issueProc.stderr).text();
+    const issueExitCode = await issueProc.exited;
+    expect({ issueExitCode, issueStderr }).toEqual({ issueExitCode: 0, issueStderr: "" });
+    const issued = JSON.parse(issueStdout);
+
     writeFileSync(paymentInput, JSON.stringify({
-      invoiceDocumentId: 1,
+      invoiceNumber: issued.invoiceNumber,
       paymentDate: "2026-05-20",
       amount: 1000,
       note: "Partial payment"
     }, null, 2));
 
-    await Bun.$`bun run src/cli.ts init --company ${company}`.quiet();
-    await Bun.$`bun run src/cli.ts invoice issue --company ${company} --input ${invoiceInput}`.quiet();
     await Bun.$`bun run src/cli.ts invoice apply-payment --company ${company} --input ${paymentInput}`.quiet();
-    await Bun.$`bun run src/cli.ts invoice claim-compensation --company ${company} --invoice-number 2026-0952C --as-of 2026-06-20`.quiet();
+    await Bun.$`bun run src/cli.ts invoice claim-compensation --company ${company} --invoice-number ${issued.invoiceNumber} --as-of 2026-06-20`.quiet();
 
-    const proc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "post-compensation", "--company", company, "--invoice-number", "2026-0952C"], {
+    const proc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "post-compensation", "--company", company, "--invoice-number", issued.invoiceNumber], {
       cwd: process.cwd(),
       stdout: "pipe",
       stderr: "pipe",
@@ -70,18 +81,29 @@ describe("invoice compensation CLI", () => {
       totals: { netAmount: 1000, vatRate: 0.25, vatAmount: 250, grossAmount: 1250 },
       currency: "DKK"
     }, null, 2));
+
+    await Bun.$`bun run src/cli.ts init --company ${company}`.quiet();
+    const issueProc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "issue", "--company", company, "--input", invoiceInput], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const issueStdout = await new Response(issueProc.stdout).text();
+    const issueStderr = await new Response(issueProc.stderr).text();
+    const issueExitCode = await issueProc.exited;
+    expect({ issueExitCode, issueStderr }).toEqual({ issueExitCode: 0, issueStderr: "" });
+    const issued = JSON.parse(issueStdout);
+
     writeFileSync(paymentInput, JSON.stringify({
-      invoiceDocumentId: 1,
+      invoiceNumber: issued.invoiceNumber,
       paymentDate: "2026-05-20",
       amount: 1000,
       note: "Partial payment"
     }, null, 2));
 
-    await Bun.$`bun run src/cli.ts init --company ${company}`.quiet();
-    await Bun.$`bun run src/cli.ts invoice issue --company ${company} --input ${invoiceInput}`.quiet();
     await Bun.$`bun run src/cli.ts invoice apply-payment --company ${company} --input ${paymentInput}`.quiet();
 
-    const proc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "claim-compensation", "--company", company, "--invoice-number", "2026-0952B", "--as-of", "2026-06-20"], {
+    const proc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "claim-compensation", "--company", company, "--invoice-number", issued.invoiceNumber, "--as-of", "2026-06-20"], {
       cwd: process.cwd(),
       stdout: "pipe",
       stderr: "pipe",
@@ -117,18 +139,29 @@ describe("invoice compensation CLI", () => {
       totals: { netAmount: 1000, vatRate: 0.25, vatAmount: 250, grossAmount: 1250 },
       currency: "DKK"
     }, null, 2));
+
+    await Bun.$`bun run src/cli.ts init --company ${company}`.quiet();
+    const issueProc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "issue", "--company", company, "--input", invoiceInput], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const issueStdout = await new Response(issueProc.stdout).text();
+    const issueStderr = await new Response(issueProc.stderr).text();
+    const issueExitCode = await issueProc.exited;
+    expect({ issueExitCode, issueStderr }).toEqual({ issueExitCode: 0, issueStderr: "" });
+    const issued = JSON.parse(issueStdout);
+
     writeFileSync(paymentInput, JSON.stringify({
-      invoiceDocumentId: 1,
+      invoiceNumber: issued.invoiceNumber,
       paymentDate: "2026-05-20",
       amount: 1000,
       note: "Partial payment"
     }, null, 2));
 
-    await Bun.$`bun run src/cli.ts init --company ${company}`.quiet();
-    await Bun.$`bun run src/cli.ts invoice issue --company ${company} --input ${invoiceInput}`.quiet();
     await Bun.$`bun run src/cli.ts invoice apply-payment --company ${company} --input ${paymentInput}`.quiet();
 
-    const proc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "compensation", "--company", company, "--invoice-number", "2026-0952", "--as-of", "2026-06-20"], {
+    const proc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "compensation", "--company", company, "--invoice-number", issued.invoiceNumber, "--as-of", "2026-06-20"], {
       cwd: process.cwd(),
       stdout: "pipe",
       stderr: "pipe",
