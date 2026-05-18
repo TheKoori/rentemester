@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ensureCompanyDirs } from "../../src/core/paths";
@@ -20,6 +21,7 @@ function insertManualEntry(db: ReturnType<typeof openDb>, input: {
   transactionDate: string;
   text: string;
   lines: ManualLine[];
+  documentId?: number | null;
   sourceBankTransactionId?: number | null;
   status?: "posted" | "reversed";
   reversalOfEntryId?: number | null;
@@ -29,7 +31,7 @@ function insertManualEntry(db: ReturnType<typeof openDb>, input: {
     transaction_date: input.transactionDate,
     text: input.text,
     source_bank_transaction_id: input.sourceBankTransactionId ?? null,
-    document_id: null,
+    document_id: input.documentId ?? null,
     currency: "DKK",
     amount_foreign: null,
     amount_dkk: null,
@@ -47,11 +49,12 @@ function insertManualEntry(db: ReturnType<typeof openDb>, input: {
       entry_no, transaction_date, text, source_bank_transaction_id, document_id,
       currency, amount_foreign, amount_dkk, fx_rate_to_dkk,
       rule_version, created_by, created_by_program, status, reversal_of_entry_id, previous_hash, entry_hash
-    ) VALUES (?, ?, ?, ?, NULL, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, ?, ?)`,
     entry.entry_no,
     entry.transaction_date,
     entry.text,
     entry.source_bank_transaction_id,
+    entry.document_id,
     entry.currency,
     entry.rule_version,
     entry.created_by,
@@ -78,6 +81,20 @@ function insertManualEntry(db: ReturnType<typeof openDb>, input: {
   }
 
   return { id: inserted.id, entryHash };
+}
+
+function insertEvidenceDocument(db: ReturnType<typeof openDb>, filePath: string, sha256Hash?: string) {
+  const hash = sha256Hash ?? createHash("sha256").update(readFileSync(filePath)).digest("hex");
+  db.run(
+    `INSERT INTO documents (source, original_filename, stored_path, mime_type, sha256_hash, document_type, status)
+     VALUES (?, ?, ?, ?, ?, 'purchase_sale', 'booked')`,
+    "manual-test",
+    filePath.split("/").pop() ?? "evidence.txt",
+    filePath,
+    "text/plain",
+    hash,
+  );
+  return (db.query("SELECT last_insert_rowid() AS id").get() as { id: number }).id;
 }
 
 describe("audit verify", () => {
@@ -145,6 +162,70 @@ describe("audit verify", () => {
     const audit = verifyAuditChain(db);
     expect(audit.ok).toBe(false);
     expect(audit.errors.some((error) => error.includes("duplicate source_bank_transaction_id"))).toBe(true);
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("flags missing evidence file for income/expense entries", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-audit-verify-"));
+    const paths = ensureCompanyDirs(root);
+    const db = openDb(paths.db);
+    migrate(db);
+    seedAccounts(db);
+
+    const evidencePath = join(root, "missing-evidence.txt");
+    writeFileSync(evidencePath, "original evidence\n");
+    const documentId = insertEvidenceDocument(db, evidencePath);
+    unlinkSync(evidencePath);
+
+    insertManualEntry(db, {
+      entryNo: "2026-00001",
+      previousHash: "GENESIS",
+      transactionDate: "2026-05-16",
+      text: "Expense with deleted evidence file",
+      documentId,
+      lines: [
+        { account_no: "3000", debit_amount: 100, credit_amount: 0, vat_code: "DK_PURCHASE_25", text: "Software" },
+        { account_no: "2000", debit_amount: 0, credit_amount: 100, vat_code: null, text: "Bank" },
+      ],
+    });
+
+    const audit = verifyAuditChain(db);
+    expect(audit.ok).toBe(false);
+    expect(audit.errors.some((error) => error.includes("evidence file is missing"))).toBe(true);
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("flags tampered evidence file hash mismatches", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-audit-verify-"));
+    const paths = ensureCompanyDirs(root);
+    const db = openDb(paths.db);
+    migrate(db);
+    seedAccounts(db);
+
+    const evidencePath = join(root, "tampered-evidence.txt");
+    writeFileSync(evidencePath, "original evidence\n");
+    const documentId = insertEvidenceDocument(db, evidencePath);
+    writeFileSync(evidencePath, "tampered evidence\n");
+
+    insertManualEntry(db, {
+      entryNo: "2026-00001",
+      previousHash: "GENESIS",
+      transactionDate: "2026-05-16",
+      text: "Expense with tampered evidence file",
+      documentId,
+      lines: [
+        { account_no: "3000", debit_amount: 100, credit_amount: 0, vat_code: "DK_PURCHASE_25", text: "Software" },
+        { account_no: "2000", debit_amount: 0, credit_amount: 100, vat_code: null, text: "Bank" },
+      ],
+    });
+
+    const audit = verifyAuditChain(db);
+    expect(audit.ok).toBe(false);
+    expect(audit.errors.some((error) => error.includes("evidence file hash mismatch"))).toBe(true);
 
     db.close();
     rmSync(root, { recursive: true, force: true });

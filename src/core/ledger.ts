@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import type { Database } from "bun:sqlite";
 import { getInvoiceStatus } from "./invoice-payments";
 import { currentRuleBundleVersion } from "./rules-metadata";
@@ -492,8 +493,23 @@ export function verifyAuditChain(db: Database) {
         errors.push(`${e.entry_no}: income/expense entry is missing document evidence`);
       } else {
         const document = db.query("SELECT id, sha256_hash, stored_path FROM documents WHERE id = ?").get(e.document_id) as { id: number; sha256_hash: string; stored_path: string | null } | null;
-        if (!document) errors.push(`${e.entry_no}: document_id ${e.document_id} is missing`);
-        if (document && (!document.sha256_hash || document.sha256_hash.trim().length === 0)) errors.push(`${e.entry_no}: document_id ${e.document_id} has no sha256_hash`);
+        if (!document) {
+          errors.push(`${e.entry_no}: document_id ${e.document_id} is missing`);
+        } else {
+          if (!document.sha256_hash || document.sha256_hash.trim().length === 0) {
+            errors.push(`${e.entry_no}: document_id ${e.document_id} has no sha256_hash`);
+          }
+          if (!document.stored_path || document.stored_path.trim().length === 0) {
+            errors.push(`${e.entry_no}: document_id ${e.document_id} has no stored_path`);
+          } else if (!existsSync(document.stored_path)) {
+            errors.push(`${e.entry_no}: document_id ${e.document_id} evidence file is missing at ${document.stored_path}`);
+          } else {
+            const actualHash = createHash("sha256").update(readFileSync(document.stored_path)).digest("hex");
+            if (actualHash !== document.sha256_hash) {
+              errors.push(`${e.entry_no}: document_id ${e.document_id} evidence file hash mismatch`);
+            }
+          }
+        }
       }
     }
 
