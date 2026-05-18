@@ -123,6 +123,47 @@ describe("bank import", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  test("imports multiline quoted text fields as one logical CSV row", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-bank-multiline-"));
+    const csv = join(root, "multiline.csv");
+    writeFileSync(csv, [
+      "transaction_date,booking_date,text,amount,currency,reference",
+      '2026-05-16,2026-05-17,"Kortkøb NETS',
+      'Kvittering 123",-1250,DKK,REF-1'
+    ].join("\n"));
+
+    const db = openDb(ensureCompanyDirs(root).db);
+    migrate(db);
+    const result = importBankCsv(db, root, csv);
+    expect(result.ok).toBe(true);
+    expect(result.imported).toBe(1);
+    const row = db.query("SELECT text, amount, reference FROM bank_transactions ORDER BY id ASC LIMIT 1").get() as any;
+    expect(row).toEqual({ text: "Kortkøb NETS\nKvittering 123", amount: -1250, reference: "REF-1" });
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("imports trailing-minus localized amounts as negative numbers", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-bank-trailing-minus-"));
+    const csv = join(root, "trailing-minus.csv");
+    writeFileSync(csv, [
+      "Bogføringsdato;Rentedato;Tekst;Beløb;Valuta;Reference",
+      "17-05-2026;16-05-2026;Gebyr;1.234,56-;DKK;N-101"
+    ].join("\n"));
+
+    const db = openDb(ensureCompanyDirs(root).db);
+    migrate(db);
+    const result = importBankCsv(db, root, csv);
+    expect(result.ok).toBe(true);
+    expect(result.imported).toBe(1);
+    const row = db.query("SELECT transaction_date, booking_date, text, amount, reference FROM bank_transactions ORDER BY id ASC LIMIT 1").get() as any;
+    expect(row).toEqual({ transaction_date: "2026-05-17", booking_date: "2026-05-16", text: "Gebyr", amount: -1234.56, reference: "N-101" });
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
   test("returns header and row-shape errors close to the CSV root cause", () => {
     const root = mkdtempSync(join(tmpdir(), "rentemester-bank-header-"));
     const csv = join(root, "bad-header.csv");

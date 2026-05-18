@@ -58,6 +58,11 @@ type CsvParseResult = {
   errors: string[];
 };
 
+type LogicalCsvLine = {
+  text: string;
+  startLine: number;
+};
+
 function normalizeHeader(value: string) {
   return value
     .trim()
@@ -121,12 +126,42 @@ function parseCsvLine(line: string, delimiter: string) {
   return { values, unterminatedQuote: inQuotes };
 }
 
+function collectLogicalCsvLines(content: string, delimiter: string): LogicalCsvLine[] {
+  const physicalLines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const logicalLines: LogicalCsvLine[] = [];
+  let buffer = "";
+  let startLine = 1;
+
+  for (const [index, line] of physicalLines.entries()) {
+    const lineNumber = index + 1;
+    if (!buffer && line.trim().length === 0) continue;
+    if (!buffer) {
+      buffer = line;
+      startLine = lineNumber;
+    } else {
+      buffer += `\n${line}`;
+    }
+
+    if (!parseCsvLine(buffer, delimiter).unterminatedQuote) {
+      logicalLines.push({ text: buffer, startLine });
+      buffer = "";
+    }
+  }
+
+  if (buffer) logicalLines.push({ text: buffer, startLine });
+  return logicalLines;
+}
+
 function parseCsv(content: string): CsvParseResult {
-  const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const physicalLines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
+  const headerLine = physicalLines.find((line) => line.trim().length > 0);
+  if (!headerLine) return { rows: [], errors: [] };
+
+  const delimiter = detectDelimiter(headerLine);
+  const lines = collectLogicalCsvLines(content, delimiter);
   if (lines.length < 2) return { rows: [], errors: [] };
 
-  const delimiter = detectDelimiter(lines[0]);
-  const headerParsed = parseCsvLine(lines[0], delimiter);
+  const headerParsed = parseCsvLine(lines[0].text, delimiter);
   const header = headerParsed.values.map(canonicalHeader);
   const errors: string[] = [];
   if (headerParsed.unterminatedQuote) errors.push("CSV header has unterminated quoted field");
@@ -137,12 +172,11 @@ function parseCsv(content: string): CsvParseResult {
   }
 
   const rows: Record<string, string>[] = [];
-  for (const [lineOffset, line] of lines.slice(1).entries()) {
-    const lineNumber = lineOffset + 2;
-    const parsed = parseCsvLine(line, delimiter);
-    if (parsed.unterminatedQuote) errors.push(`CSV row ${lineNumber} has unterminated quoted field`);
+  for (const logicalLine of lines.slice(1)) {
+    const parsed = parseCsvLine(logicalLine.text, delimiter);
+    if (parsed.unterminatedQuote) errors.push(`CSV row ${logicalLine.startLine} has unterminated quoted field`);
     if (parsed.values.length !== header.length) {
-      errors.push(`CSV row ${lineNumber} has ${parsed.values.length} fields, header has ${header.length}`);
+      errors.push(`CSV row ${logicalLine.startLine} has ${parsed.values.length} fields, header has ${header.length}`);
       continue;
     }
     const row: Record<string, string> = {};
@@ -156,10 +190,14 @@ function parseLocalizedNumber(value: string | undefined) {
   if (!value) return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  const normalized = trimmed.includes(",")
-    ? trimmed.replace(/\./g, "").replace(",", ".")
-    : trimmed;
-  return Number(normalized.replace(/\s/g, ""));
+  const trailingMinus = trimmed.endsWith("-");
+  const unsigned = trailingMinus ? trimmed.slice(0, -1).trim() : trimmed;
+  const normalized = unsigned.includes(",")
+    ? unsigned.replace(/\./g, "").replace(",", ".")
+    : unsigned;
+  const parsed = Number(normalized.replace(/\s/g, ""));
+  if (!Number.isFinite(parsed)) return parsed;
+  return trailingMinus ? -parsed : parsed;
 }
 
 function normalizeDateText(value: string | undefined) {
