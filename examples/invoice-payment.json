@@ -1,5 +1,5 @@
 {
-  "invoiceDocumentId": 1,
+  "invoiceNumber": "2026-0001",
   "paymentDate": "2026-05-20",
   "amount": 1250,
   "note": "Paid in full"
