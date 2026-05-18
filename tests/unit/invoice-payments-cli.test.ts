@@ -4,15 +4,25 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 describe("invoice payment CLI", () => {
-  test("applies payment to issued invoice from input json", async () => {
+  test("applies payment to issued invoice from invoice-number input json", async () => {
     const root = mkdtempSync(join(tmpdir(), "rentemester-invoicepay-cli-"));
     const company = join(root, "company");
     const paymentJson = join(root, "payment.json");
 
     await Bun.$`bun run src/cli.ts init --company ${company}`.quiet();
-    await Bun.$`bun run src/cli.ts invoice issue --company ${company} --input examples/full-invoice.dk.json`.quiet();
+    const issueProc = Bun.spawn(["bun", "run", "src/cli.ts", "invoice", "issue", "--company", company, "--input", "examples/full-invoice.dk.json"], {
+      cwd: process.cwd(),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const issueStdout = await new Response(issueProc.stdout).text();
+    const issueStderr = await new Response(issueProc.stderr).text();
+    const issueExitCode = await issueProc.exited;
+    expect({ issueExitCode, issueStderr }).toEqual({ issueExitCode: 0, issueStderr: "" });
+    const issued = JSON.parse(issueStdout);
+
     writeFileSync(paymentJson, JSON.stringify({
-      invoiceDocumentId: 1,
+      invoiceNumber: issued.invoiceNumber,
       paymentDate: "2026-05-20",
       amount: 1250,
       note: "Paid in full"
