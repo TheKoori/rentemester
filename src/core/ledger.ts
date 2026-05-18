@@ -540,6 +540,30 @@ export function verifyAuditChain(db: Database) {
     errors.push(`invoice payment ${payment.id} for invoice ${payment.invoice_no ?? payment.invoice_document_id} is missing journal evidence`);
   }
 
+  const unlinkedInvoiceRefunds = db.query(
+    `SELECT r.id, r.invoice_document_id, r.journal_entry_id, d.invoice_no
+     FROM invoice_refunds r
+     LEFT JOIN journal_entries j ON j.id = r.journal_entry_id
+     LEFT JOIN documents d ON d.id = r.invoice_document_id
+     WHERE r.journal_entry_id IS NULL OR j.id IS NULL
+     ORDER BY r.id ASC`
+  ).all() as Array<{ id: number; invoice_document_id: number; journal_entry_id: number | null; invoice_no: string | null }>;
+  for (const refund of unlinkedInvoiceRefunds) {
+    errors.push(`invoice refund ${refund.id} for invoice ${refund.invoice_no ?? refund.invoice_document_id} is missing journal evidence`);
+  }
+
+  const unlinkedInvoiceClaimPayments = db.query(
+    `SELECT p.id, p.invoice_document_id, p.journal_entry_id, d.invoice_no
+     FROM invoice_claim_payments p
+     LEFT JOIN journal_entries j ON j.id = p.journal_entry_id
+     LEFT JOIN documents d ON d.id = p.invoice_document_id
+     WHERE p.journal_entry_id IS NULL OR j.id IS NULL
+     ORDER BY p.id ASC`
+  ).all() as Array<{ id: number; invoice_document_id: number; journal_entry_id: number | null; invoice_no: string | null }>;
+  for (const payment of unlinkedInvoiceClaimPayments) {
+    errors.push(`invoice claim payment ${payment.id} for invoice ${payment.invoice_no ?? payment.invoice_document_id} is missing journal evidence`);
+  }
+
   const issuedInvoices = db.query("SELECT id, invoice_no, status FROM documents WHERE document_type = 'issued_invoice' ORDER BY id ASC").all() as Array<{ id: number; invoice_no: string | null; status: string | null }>;
   const allowedStoredStatus: Record<string, string[]> = {
     open: ["issued", "open"],

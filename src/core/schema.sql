@@ -210,13 +210,15 @@ CREATE TABLE IF NOT EXISTS invoice_refunds (
   id INTEGER PRIMARY KEY,
   invoice_document_id INTEGER NOT NULL,
   bank_transaction_id INTEGER,
+  journal_entry_id INTEGER NOT NULL UNIQUE,
   refund_date TEXT NOT NULL,
   amount NUMERIC NOT NULL CHECK(amount > 0),
   currency TEXT NOT NULL DEFAULT 'DKK',
   note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(invoice_document_id) REFERENCES documents(id),
-  FOREIGN KEY(bank_transaction_id) REFERENCES bank_transactions(id)
+  FOREIGN KEY(bank_transaction_id) REFERENCES bank_transactions(id),
+  FOREIGN KEY(journal_entry_id) REFERENCES journal_entries(id)
 );
 
 CREATE TABLE IF NOT EXISTS invoice_reminders (
@@ -286,13 +288,15 @@ CREATE TABLE IF NOT EXISTS invoice_claim_payments (
   id INTEGER PRIMARY KEY,
   invoice_document_id INTEGER NOT NULL,
   bank_transaction_id INTEGER,
+  journal_entry_id INTEGER NOT NULL UNIQUE,
   payment_date TEXT NOT NULL,
   amount NUMERIC NOT NULL CHECK(amount > 0),
   currency TEXT NOT NULL DEFAULT 'DKK',
   note TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY(invoice_document_id) REFERENCES documents(id),
-  FOREIGN KEY(bank_transaction_id) REFERENCES bank_transactions(id)
+  FOREIGN KEY(bank_transaction_id) REFERENCES bank_transactions(id),
+  FOREIGN KEY(journal_entry_id) REFERENCES journal_entries(id)
 );
 
 CREATE TABLE IF NOT EXISTS invoice_bad_debt_writeoffs (
@@ -513,6 +517,13 @@ BEGIN
   SELECT RAISE(ABORT, 'invoice payments are append-only; add a correcting payment application instead');
 END;
 
+CREATE TRIGGER IF NOT EXISTS invoice_refunds_require_journal
+BEFORE INSERT ON invoice_refunds
+WHEN NEW.journal_entry_id IS NULL
+BEGIN
+  SELECT RAISE(ABORT, 'invoice refunds must reference a journal entry');
+END;
+
 CREATE TRIGGER IF NOT EXISTS invoice_refunds_no_update
 BEFORE UPDATE ON invoice_refunds
 BEGIN
@@ -595,6 +606,13 @@ CREATE TRIGGER IF NOT EXISTS invoice_interest_postings_no_delete
 BEFORE DELETE ON invoice_interest_postings
 BEGIN
   SELECT RAISE(ABORT, 'invoice interest postings are append-only; reverse the journal entry instead');
+END;
+
+CREATE TRIGGER IF NOT EXISTS invoice_claim_payments_require_journal
+BEFORE INSERT ON invoice_claim_payments
+WHEN NEW.journal_entry_id IS NULL
+BEGIN
+  SELECT RAISE(ABORT, 'invoice claim payments must reference a journal entry');
 END;
 
 CREATE TRIGGER IF NOT EXISTS invoice_claim_payments_no_update

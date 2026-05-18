@@ -32,9 +32,13 @@ export function migrate(db: Database) {
   if (!hasColumn(db, "journal_entries", "amount_dkk")) db.exec("ALTER TABLE journal_entries ADD COLUMN amount_dkk NUMERIC;");
   if (!hasColumn(db, "journal_entries", "fx_rate_to_dkk")) db.exec("ALTER TABLE journal_entries ADD COLUMN fx_rate_to_dkk NUMERIC;");
   if (!hasColumn(db, "invoice_payments", "journal_entry_id")) db.exec("ALTER TABLE invoice_payments ADD COLUMN journal_entry_id INTEGER;");
+  if (!hasColumn(db, "invoice_refunds", "journal_entry_id")) db.exec("ALTER TABLE invoice_refunds ADD COLUMN journal_entry_id INTEGER;");
+  if (!hasColumn(db, "invoice_claim_payments", "journal_entry_id")) db.exec("ALTER TABLE invoice_claim_payments ADD COLUMN journal_entry_id INTEGER;");
   if (!hasColumn(db, "exceptions", "source_evidence")) db.exec("ALTER TABLE exceptions ADD COLUMN source_evidence TEXT;");
   if (!hasColumn(db, "exceptions", "posting_preview")) db.exec("ALTER TABLE exceptions ADD COLUMN posting_preview TEXT;");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_payments_journal_entry ON invoice_payments(journal_entry_id) WHERE journal_entry_id IS NOT NULL;");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_refunds_journal_entry ON invoice_refunds(journal_entry_id) WHERE journal_entry_id IS NOT NULL;");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_invoice_claim_payments_journal_entry ON invoice_claim_payments(journal_entry_id) WHERE journal_entry_id IS NOT NULL;");
   db.exec("CREATE INDEX IF NOT EXISTS idx_accounting_periods_covering_date ON accounting_periods(period_start, period_end, status);");
   backfillRetentionDeadlines(db);
 }

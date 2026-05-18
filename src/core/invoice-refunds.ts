@@ -24,7 +24,6 @@ export type RefundInvoiceToBankResult = JournalPostResult & {
   remainingCreditBalance?: number;
 };
 
-
 function getOutgoingRefundBankTransaction(db: Database, input: RefundInvoiceToBankInput) {
   if (input.bankTransactionId === undefined && !input.bankTransactionReference) {
     return { error: "bankTransactionId or bankTransactionReference is required" };
@@ -73,21 +72,6 @@ export function refundInvoiceToBank(db: Database, input: RefundInvoiceToBankInpu
 
   try {
     const result = db.transaction(() => {
-      const refund = db.query(
-        `INSERT INTO invoice_refunds (invoice_document_id, bank_transaction_id, refund_date, amount, currency, note)
-         VALUES (?, ?, ?, ?, 'DKK', ?)
-         RETURNING id`
-      ).get(input.invoiceDocumentId, bank.id, refundDate, amount, `Customer refund from transaction ${bank.id}`) as { id: number };
-
-      insertAuditLog(db, {
-        eventType: "invoice_refund_apply",
-        entityType: "invoice_refund",
-        entityId: refund.id,
-        message: `Applied refund ${amount} to invoice ${invoice.invoice_no}`,
-        createdBy: input.createdBy,
-        createdByProgram: input.createdByProgram,
-      });
-
       const journal = postJournalEntry(db, {
         transactionDate: refundDate,
         text: `Customer refund for invoice ${invoice.invoice_no}`,
@@ -100,7 +84,22 @@ export function refundInvoiceToBank(db: Database, input: RefundInvoiceToBankInpu
           { accountNo: input.bankAccountNo ?? "2000", creditAmount: amount, text: `Bank refund ${invoice.invoice_no}` },
         ],
       });
-      if (!journal.ok) throw new Error(JSON.stringify({ appliedRules: journal.appliedRules, errors: journal.errors }));
+      if (!journal.ok || journal.entryId == null) throw new Error(JSON.stringify({ appliedRules: journal.appliedRules, errors: journal.errors }));
+
+      const refund = db.query(
+        `INSERT INTO invoice_refunds (invoice_document_id, bank_transaction_id, journal_entry_id, refund_date, amount, currency, note)
+         VALUES (?, ?, ?, ?, ?, 'DKK', ?)
+         RETURNING id`
+      ).get(input.invoiceDocumentId, bank.id, journal.entryId, refundDate, amount, `Customer refund from transaction ${bank.id}`) as { id: number };
+
+      insertAuditLog(db, {
+        eventType: "invoice_refund_apply",
+        entityType: "invoice_refund",
+        entityId: refund.id,
+        message: `Applied refund ${amount} to invoice ${invoice.invoice_no}`,
+        createdBy: input.createdBy,
+        createdByProgram: input.createdByProgram,
+      });
 
       const after = getInvoiceStatus(db, input.invoiceDocumentId);
       if (!after.ok) throw new Error(JSON.stringify({ errors: after.errors }));

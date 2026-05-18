@@ -24,7 +24,6 @@ export type SettleInvoiceClaimsFromBankResult = JournalPostResult & {
   remainingClaimOpenBalance?: number;
 };
 
-
 function getIncomingClaimBankTransaction(db: Database, input: SettleInvoiceClaimsFromBankInput) {
   if (input.bankTransactionId === undefined && !input.bankTransactionReference) {
     return { error: "bankTransactionId or bankTransactionReference is required" };
@@ -78,21 +77,6 @@ export function settleInvoiceClaimsFromBank(db: Database, input: SettleInvoiceCl
 
   try {
     const result = db.transaction(() => {
-      const payment = db.query(
-        `INSERT INTO invoice_claim_payments (invoice_document_id, bank_transaction_id, payment_date, amount, currency, note)
-         VALUES (?, ?, ?, ?, 'DKK', ?)
-         RETURNING id`
-      ).get(input.invoiceDocumentId, bank.id, paymentDate, amount, `Claim settlement from transaction ${bank.id}`) as { id: number };
-
-      insertAuditLog(db, {
-        eventType: "invoice_claim_payment_apply",
-        entityType: "invoice_claim_payment",
-        entityId: payment.id,
-        message: `Applied claim receipt ${amount} to invoice ${invoice.invoice_no}`,
-        createdBy: input.createdBy,
-        createdByProgram: input.createdByProgram,
-      });
-
       const journal = postJournalEntry(db, {
         transactionDate: paymentDate,
         text: `Customer claim payment for invoice ${invoice.invoice_no}`,
@@ -105,7 +89,22 @@ export function settleInvoiceClaimsFromBank(db: Database, input: SettleInvoiceCl
           { accountNo: input.receivableAccountNo ?? "1100", creditAmount: amount, text: `Claim receivable settlement ${invoice.invoice_no}` },
         ],
       });
-      if (!journal.ok) throw new Error(JSON.stringify({ appliedRules: journal.appliedRules, errors: journal.errors }));
+      if (!journal.ok || journal.entryId == null) throw new Error(JSON.stringify({ appliedRules: journal.appliedRules, errors: journal.errors }));
+
+      const payment = db.query(
+        `INSERT INTO invoice_claim_payments (invoice_document_id, bank_transaction_id, journal_entry_id, payment_date, amount, currency, note)
+         VALUES (?, ?, ?, ?, ?, 'DKK', ?)
+         RETURNING id`
+      ).get(input.invoiceDocumentId, bank.id, journal.entryId, paymentDate, amount, `Claim settlement from transaction ${bank.id}`) as { id: number };
+
+      insertAuditLog(db, {
+        eventType: "invoice_claim_payment_apply",
+        entityType: "invoice_claim_payment",
+        entityId: payment.id,
+        message: `Applied claim receipt ${amount} to invoice ${invoice.invoice_no}`,
+        createdBy: input.createdBy,
+        createdByProgram: input.createdByProgram,
+      });
 
       const after = getInvoiceStatus(db, input.invoiceDocumentId);
       if (!after.ok) throw new Error(JSON.stringify({ errors: after.errors }));

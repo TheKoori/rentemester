@@ -172,11 +172,14 @@ export function settleInvoiceFromBank(db: Database, input: SettleInvoiceFromBank
       for (const rule of payment.appliedRules ?? []) appliedRules.add(rule);
 
       if (claimAmount > 0) {
+        if (journalEntryId == null) {
+          throw new Error(JSON.stringify({ appliedRules: [COMBINED_RULE_ID], errors: ["combined settlement is missing journal evidence for claim component"] }));
+        }
         const claimPayment = db.query(
-          `INSERT INTO invoice_claim_payments (invoice_document_id, bank_transaction_id, payment_date, amount, currency, note)
-           VALUES (?, ?, ?, ?, ?, ?)
+          `INSERT INTO invoice_claim_payments (invoice_document_id, bank_transaction_id, journal_entry_id, payment_date, amount, currency, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            RETURNING id`
-        ).get(input.invoiceDocumentId, bank.id, paymentDate, claimAmount, invoiceCurrency, `Combined settlement claim component from transaction ${bank.id}`) as { id: number };
+        ).get(input.invoiceDocumentId, bank.id, journalEntryId, paymentDate, claimAmount, invoiceCurrency, `Combined settlement claim component from transaction ${bank.id}`) as { id: number };
         claimPaymentId = claimPayment.id;
         insertAuditLog(db, {
           eventType: "invoice_claim_payment_apply",

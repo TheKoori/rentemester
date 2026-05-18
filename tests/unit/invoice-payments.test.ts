@@ -225,4 +225,100 @@ describe("invoice payments", () => {
     db.close();
     rmSync(root, { recursive: true, force: true });
   });
+
+  test("rejects direct invoice refund inserts without journal evidence and audit verify flags orphaned refund rows", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-invoice-refund-proof-"));
+    const db = openDb(ensureCompanyDirs(root).db);
+    migrate(db);
+    seedAccounts(db);
+
+    const issued = issueInvoice(db, root, {
+      invoiceType: "full",
+      vatTreatment: "standard",
+      issueDate: "2026-05-16",
+      invoiceNumber: "2026-0702",
+      seller: { name: "Rentemester ApS", address: "Testvej 1", vatOrCvr: "DK12345678" },
+      buyer: { name: "Kunde A/S", address: "Købervej 9" },
+      lines: [{ description: "Bogføring", quantity: 1, unitPriceExVat: 1000, lineTotalExVat: 1000 }],
+      totals: { netAmount: 1000, vatRate: 0.25, vatAmount: 250, grossAmount: 1250 },
+      currency: "DKK"
+    });
+    expect(issued.ok).toBe(true);
+
+    expect(() => db.run(
+      `INSERT INTO invoice_refunds (invoice_document_id, refund_date, amount, currency, note)
+       VALUES (?, ?, ?, 'DKK', ?)`,
+      issued.documentId!,
+      "2026-05-20",
+      100,
+      "Manual refund entry"
+    )).toThrow("invoice refunds must reference a journal entry");
+
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.run(
+      `INSERT INTO invoice_refunds (invoice_document_id, refund_date, amount, currency, journal_entry_id, note)
+       VALUES (?, ?, ?, 'DKK', ?, ?)`,
+      issued.documentId!,
+      "2026-05-20",
+      100,
+      999999,
+      "Broken legacy refund import"
+    );
+    db.exec("PRAGMA foreign_keys = ON");
+
+    const audit = verifyAuditChain(db);
+    expect(audit.ok).toBe(false);
+    expect(audit.errors.some((error) => error.includes("invoice refund") && error.includes("missing journal evidence"))).toBe(true);
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test("rejects direct invoice claim-payment inserts without journal evidence and audit verify flags orphaned claim-payment rows", () => {
+    const root = mkdtempSync(join(tmpdir(), "rentemester-invoice-claim-proof-"));
+    const db = openDb(ensureCompanyDirs(root).db);
+    migrate(db);
+    seedAccounts(db);
+
+    const issued = issueInvoice(db, root, {
+      invoiceType: "full",
+      vatTreatment: "standard",
+      issueDate: "2026-05-16",
+      invoiceNumber: "2026-0703",
+      seller: { name: "Rentemester ApS", address: "Testvej 1", vatOrCvr: "DK12345678" },
+      buyer: { name: "Kunde A/S", address: "Købervej 9" },
+      lines: [{ description: "Bogføring", quantity: 1, unitPriceExVat: 1000, lineTotalExVat: 1000 }],
+      totals: { netAmount: 1000, vatRate: 0.25, vatAmount: 250, grossAmount: 1250 },
+      currency: "DKK"
+    });
+    expect(issued.ok).toBe(true);
+
+    expect(() => db.run(
+      `INSERT INTO invoice_claim_payments (invoice_document_id, payment_date, amount, currency, note)
+       VALUES (?, ?, ?, 'DKK', ?)`,
+      issued.documentId!,
+      "2026-05-20",
+      100,
+      "Manual claim payment entry"
+    )).toThrow("invoice claim payments must reference a journal entry");
+
+    db.exec("PRAGMA foreign_keys = OFF");
+    db.run(
+      `INSERT INTO invoice_claim_payments (invoice_document_id, payment_date, amount, currency, journal_entry_id, note)
+       VALUES (?, ?, ?, 'DKK', ?, ?)`,
+      issued.documentId!,
+      "2026-05-20",
+      100,
+      999999,
+      "Broken legacy claim payment import"
+    );
+    db.exec("PRAGMA foreign_keys = ON");
+
+    const audit = verifyAuditChain(db);
+    expect(audit.ok).toBe(false);
+    expect(audit.errors.some((error) => error.includes("invoice claim payment") && error.includes("missing journal evidence"))).toBe(true);
+
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
 });
